@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: netsec_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: netsecanalyzer
+      MYSQL_USER: netsec
+      MYSQL_PASSWORD: netsec123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - netsec_network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: netsec_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - netsec_network
+
+  # 后端应用
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: netsec_backend
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=netsec
+      - DB_PASSWORD=netsec123
+      - DB_NAME=netsecanalyzer
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./configs:/app/configs
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    networks:
+      - netsec_network
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    privileged: true
+
+volumes:
+  mysql_data:
+
+networks:
+  netsec_network:
+    driver: bridge

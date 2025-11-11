@@ -1,0 +1,61 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  mode: "debug" # debug, release
+
+database:
+  host: "localhost"
+  port: 3306
+  user: "root"
+  password: "root"
+  dbname: "netsecanalyzer"
+  charset: "utf8mb4"
+  max_idle_conns: 10
+  max_open_conns: 100
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+
+capture:
+  ip:
+    default_interface: "auto"  # auto 表示自动选择第一个可用接口
+    snaplen: 65536
+    promisc: true
+    timeout: 3                 # 改为 3 秒
+    buffer_size: 50000         # 增加到 50000
+  can:
+    default_interface: "can0"
+    bitrate: 500000            # 添加波特率配置
+    buffer_size: 5000          # 增加缓冲区
+  rs485:
+    default_port: "/dev/ttyUSB0"
+    baudrate: 9600
+    databits: 8
+    parity: "N"
+    stopbits: 1
+    timeout: 1000              # 添加超时（毫秒）
+  # 通用配置
+  max_file_size: 1073741824    # 1GB，单个 PCAP 文件最大大小
+  auto_rotate: true            # 自动轮转文件
+  save_path: "./captures"      # 保存路径
+
+scanner:
+  max_concurrent: 100
+  timeout: 5
+  rate_limit: 1000
+
+attack:
+  authorization_required: true
+  max_rate: 100
+
+log:
+  level: "info" # debug, info, warn, error
+  format: "json"
+  output: "stdout"
+  file_path: "./logs/app.log"
+  max_size: 100 # MB
+  max_backups: 5
+  max_age: 30 # days
