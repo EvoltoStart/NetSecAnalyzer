@@ -65,10 +65,16 @@ func (r *Router) setupRoutes() {
 			capture.GET("/sessions", r.captureHandler.ListSessions)
 			capture.GET("/sessions/:id", r.captureHandler.GetSession)
 			capture.GET("/sessions/:id/packets", r.captureHandler.GetPackets)
+			capture.GET("/sessions/:id/export", r.captureHandler.ExportSession)
+			capture.DELETE("/sessions/:id", r.captureHandler.DeleteSession)
 			capture.GET("/interfaces", r.captureHandler.GetInterfaces)
 			capture.GET("/serial-ports", r.captureHandler.GetSerialPorts)
 			capture.POST("/upload", r.captureHandler.UploadPCAP)
+			capture.GET("/packets/:id/payload", r.captureHandler.GetPayload)
 		}
+
+		// WebSocket
+		api.GET("/ws", r.captureHandler.HandleWebSocket)
 
 		// 协议分析
 		analyze := api.Group("/analyze")
@@ -76,6 +82,10 @@ func (r *Router) setupRoutes() {
 			analyze.POST("/parse", r.analyzeHandler.ParsePacket)
 			analyze.GET("/protocols", r.analyzeHandler.GetProtocols)
 			analyze.POST("/statistics", r.analyzeHandler.GetStatistics)
+			analyze.GET("/packets/:id/result", r.analyzeHandler.GetPacketAnalysis)
+			analyze.GET("/sessions/:id/results", r.analyzeHandler.GetSessionAnalysis)
+			analyze.GET("/sessions/:id/anomalies", r.analyzeHandler.GetSessionAnomalies)
+			analyze.POST("/sessions/:id/reanalyze", r.analyzeHandler.ReanalyzeSession)
 		}
 
 		// 漏洞扫描
@@ -84,6 +94,11 @@ func (r *Router) setupRoutes() {
 			scan.POST("/start", r.scanHandler.StartScan)
 			scan.GET("/tasks", r.scanHandler.ListTasks)
 			scan.GET("/tasks/:id", r.scanHandler.GetTask)
+			scan.GET("/tasks/:id/results", r.scanHandler.GetTaskResults)
+			scan.GET("/tasks/:id/vulnerabilities", r.scanHandler.GetTaskVulnerabilities)
+			scan.POST("/tasks/:id/stop", r.scanHandler.StopTask)
+			scan.DELETE("/tasks/:id", r.scanHandler.DeleteTask)
+			scan.GET("/tasks/:id/export", r.scanHandler.ExportTaskResults)
 		}
 
 		// 攻防模拟

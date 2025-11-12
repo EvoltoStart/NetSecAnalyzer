@@ -7,6 +7,7 @@ import (
 	"netsecanalyzer/internal/models"
 	"netsecanalyzer/pkg/logger"
 	"netsecanalyzer/pkg/utils"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,6 +18,8 @@ type Scanner struct {
 	Timeout       time.Duration
 	RateLimit     int
 	Progress      func(current, total int)
+	CANScanner    *CANScanner
+	RS485Scanner  *RS485Scanner
 }
 
 // NewScanner 创建扫描器
@@ -26,6 +29,16 @@ func NewScanner(maxConcurrent int, timeout time.Duration, rateLimit int) *Scanne
 		Timeout:       timeout,
 		RateLimit:     rateLimit,
 	}
+}
+
+// SetCANScanner 设置 CAN 扫描器
+func (s *Scanner) SetCANScanner(iface string) {
+	s.CANScanner = NewCANScanner(iface, s.Timeout, s.MaxConcurrent)
+}
+
+// SetRS485Scanner 设置 RS485 扫描器
+func (s *Scanner) SetRS485Scanner(port string, baudRate int) {
+	s.RS485Scanner = NewRS485Scanner(port, baudRate, s.Timeout, s.MaxConcurrent)
 }
 
 // ScanResult 扫描结果
@@ -44,6 +57,8 @@ type PortInfo struct {
 	Protocol string `json:"protocol"`
 	State    string `json:"state"`
 	Service  string `json:"service,omitempty"`
+	Version  string `json:"version,omitempty"`
+	Banner   string `json:"banner,omitempty"`
 }
 
 // ServiceInfo 服务信息
@@ -91,16 +106,38 @@ func (s *Scanner) ScanPorts(ctx context.Context, target string, ports []int) (*S
 				defer func() { <-semaphore }()
 
 				if s.scanPort(target, p) {
+					// 端口开放，尝试识别服务和抓取 Banner
+					serviceName := getServiceName(p)
+					version := ""
+					banner := ""
+
+					// 尝试抓取 Banner 和识别版本
+					serviceInfo := s.identifyService(target, p)
+					if serviceInfo != nil {
+						if serviceInfo.Version != "" {
+							version = serviceInfo.Version
+						}
+						if serviceInfo.Banner != "" {
+							banner = serviceInfo.Banner
+						}
+						if serviceInfo.Name != "" && serviceInfo.Name != "Unknown" {
+							serviceName = serviceInfo.Name
+						}
+					}
+
 					portInfo := PortInfo{
 						Port:     p,
 						Protocol: "TCP",
 						State:    "open",
-						Service:  getServiceName(p),
+						Service:  serviceName,
+						Version:  version,
+						Banner:   banner,
 					}
 					mu.Lock()
 					result.OpenPorts = append(result.OpenPorts, portInfo)
 					mu.Unlock()
-					logger.GetLogger().Debugf("Found open port: %s:%d", target, p)
+					logger.GetLogger().Debugf("Found open port: %s:%d (service: %s, version: %s)",
+						target, p, serviceName, version)
 				}
 
 				mu.Lock()
@@ -178,32 +215,78 @@ func (s *Scanner) identifyService(host string, port int) *ServiceInfo {
 	// 设置读取超时
 	conn.SetReadDeadline(time.Now().Add(s.Timeout))
 
-	// 尝试抓取 banner
-	buffer := make([]byte, 1024)
-	n, err := conn.Read(buffer)
+	serviceName := getServiceName(port)
 	var banner string
-	if err == nil && n > 0 {
-		banner = string(buffer[:n])
-	}
+	buffer := make([]byte, 4096)
 
-	// 如果没有主动发送 banner，尝试发送探测包
-	if banner == "" {
-		conn.Write([]byte("HEAD / HTTP/1.0\r\n\r\n"))
+	// 根据端口类型发送不同的探测包
+	switch port {
+	case 21: // FTP
+		n, _ := conn.Read(buffer)
+		if n > 0 {
+			banner = string(buffer[:n])
+		}
+	case 22: // SSH
+		n, _ := conn.Read(buffer)
+		if n > 0 {
+			banner = string(buffer[:n])
+		}
+	case 25, 110, 143: // SMTP, POP3, IMAP
+		n, _ := conn.Read(buffer)
+		if n > 0 {
+			banner = string(buffer[:n])
+		}
+	case 80, 8080, 8000, 8888: // HTTP
+		conn.Write([]byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: NetSecAnalyzer/1.0\r\n\r\n"))
 		conn.SetReadDeadline(time.Now().Add(s.Timeout))
-		n, err = conn.Read(buffer)
+		n, _ := conn.Read(buffer)
+		if n > 0 {
+			banner = string(buffer[:n])
+		}
+	case 443, 8443: // HTTPS
+		// HTTPS 需要 TLS 握手，这里简化处理
+		serviceName = "HTTPS"
+		banner = "HTTPS service (TLS encrypted)"
+	case 3306: // MySQL
+		n, _ := conn.Read(buffer)
+		if n > 0 {
+			banner = string(buffer[:n])
+		}
+	case 5432: // PostgreSQL
+		n, _ := conn.Read(buffer)
+		if n > 0 {
+			banner = string(buffer[:n])
+		}
+	case 6379: // Redis
+		conn.Write([]byte("INFO\r\n"))
+		conn.SetReadDeadline(time.Now().Add(s.Timeout))
+		n, _ := conn.Read(buffer)
+		if n > 0 {
+			banner = string(buffer[:n])
+		}
+	default:
+		// 尝试读取主动发送的 banner
+		n, err := conn.Read(buffer)
 		if err == nil && n > 0 {
 			banner = string(buffer[:n])
+		} else {
+			// 尝试发送 HTTP 请求
+			conn.Write([]byte("HEAD / HTTP/1.0\r\n\r\n"))
+			conn.SetReadDeadline(time.Now().Add(s.Timeout))
+			n, err = conn.Read(buffer)
+			if err == nil && n > 0 {
+				banner = string(buffer[:n])
+			}
 		}
 	}
 
-	serviceName := getServiceName(port)
-	version := extractVersion(banner)
+	version := extractVersion(banner, serviceName)
 
 	return &ServiceInfo{
 		Port:    port,
 		Name:    serviceName,
 		Version: version,
-		Banner:  banner,
+		Banner:  cleanBanner(banner),
 	}
 }
 
@@ -312,6 +395,20 @@ func (s *Scanner) checkMisconfigurations(target string, service ServiceInfo) []m
 			vulnerabilities = append(vulnerabilities, vuln)
 		}
 
+		// 检查 HTTP 服务的版本信息泄露
+		if service.Version != "" && strings.Contains(strings.ToLower(service.Banner), "server:") {
+			vuln := models.Vulnerability{
+				Target:       fmt.Sprintf("%s:%d", target, service.Port),
+				VulnType:     "Information Disclosure",
+				Severity:     "low",
+				Title:        "Server version information disclosure",
+				Description:  fmt.Sprintf("Web server exposes version information: %s", service.Version),
+				Solution:     "Configure web server to hide version information in HTTP headers",
+				DiscoveredAt: time.Now(),
+			}
+			vulnerabilities = append(vulnerabilities, vuln)
+		}
+
 	case "FTP":
 		// 检查匿名登录
 		if s.checkAnonymousFTP(target, service.Port) {
@@ -326,6 +423,47 @@ func (s *Scanner) checkMisconfigurations(target string, service ServiceInfo) []m
 			}
 			vulnerabilities = append(vulnerabilities, vuln)
 		}
+
+	case "SSH":
+		// 检查 SSH 版本是否过旧
+		if service.Version != "" && strings.Contains(strings.ToLower(service.Version), "openssh") {
+			vuln := models.Vulnerability{
+				Target:       fmt.Sprintf("%s:%d", target, service.Port),
+				VulnType:     "Information Disclosure",
+				Severity:     "low",
+				Title:        "SSH version information exposed",
+				Description:  fmt.Sprintf("SSH server exposes version: %s", service.Version),
+				Solution:     "Consider updating to the latest SSH version and configure to hide version details",
+				DiscoveredAt: time.Now(),
+			}
+			vulnerabilities = append(vulnerabilities, vuln)
+		}
+
+	case "Telnet":
+		// Telnet 本身就是不安全的
+		vuln := models.Vulnerability{
+			Target:       fmt.Sprintf("%s:%d", target, service.Port),
+			VulnType:     "Insecure Protocol",
+			Severity:     "high",
+			Title:        "Insecure Telnet service detected",
+			Description:  "Telnet transmits data in plaintext, including passwords",
+			Solution:     "Disable Telnet and use SSH instead",
+			DiscoveredAt: time.Now(),
+		}
+		vulnerabilities = append(vulnerabilities, vuln)
+
+	case "MySQL", "PostgreSQL", "Redis":
+		// 数据库服务暴露在公网
+		vuln := models.Vulnerability{
+			Target:       fmt.Sprintf("%s:%d", target, service.Port),
+			VulnType:     "Exposure",
+			Severity:     "medium",
+			Title:        fmt.Sprintf("%s database service exposed", service.Name),
+			Description:  fmt.Sprintf("%s database is accessible from external network", service.Name),
+			Solution:     "Restrict database access to trusted networks only using firewall rules",
+			DiscoveredAt: time.Now(),
+		}
+		vulnerabilities = append(vulnerabilities, vuln)
 	}
 
 	return vulnerabilities
@@ -378,10 +516,77 @@ func isAuthService(service string) bool {
 }
 
 // extractVersion 从 banner 中提取版本信息
-func extractVersion(banner string) string {
-	// 简化实现，实际应该使用正则表达式提取版本号
-	if len(banner) > 100 {
-		return banner[:100]
+func extractVersion(banner string, serviceName string) string {
+	if banner == "" {
+		return ""
+	}
+
+	// 根据服务类型提取版本信息
+	switch serviceName {
+	case "SSH":
+		// SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.5
+		if len(banner) > 4 && banner[:4] == "SSH-" {
+			parts := strings.Split(banner, " ")
+			if len(parts) > 0 {
+				return strings.TrimSpace(parts[0])
+			}
+		}
+	case "HTTP", "HTTPS":
+		// Server: Apache/2.4.41 (Ubuntu)
+		lines := strings.Split(banner, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(strings.ToLower(line), "server:") {
+				return strings.TrimSpace(line[7:])
+			}
+		}
+	case "FTP":
+		// 220 ProFTPD 1.3.5 Server
+		if len(banner) > 4 {
+			parts := strings.Fields(banner)
+			if len(parts) >= 2 {
+				return strings.Join(parts[1:], " ")
+			}
+		}
+	case "MySQL":
+		// MySQL 版本在握手包中
+		if strings.Contains(banner, "mysql") || strings.Contains(banner, "MySQL") {
+			return "MySQL"
+		}
+	case "Redis":
+		// redis_version:6.0.16
+		lines := strings.Split(banner, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "redis_version:") {
+				return "Redis " + strings.TrimSpace(line[14:])
+			}
+		}
+	}
+
+	// 通用版本提取：简化实现，返回前 200 个字符
+	if len(banner) > 200 {
+		return banner[:200]
 	}
 	return banner
+}
+
+// cleanBanner 清理 banner 字符串
+func cleanBanner(banner string) string {
+	if banner == "" {
+		return ""
+	}
+
+	// 移除不可打印字符
+	cleaned := strings.Map(func(r rune) rune {
+		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
+			return -1
+		}
+		return r
+	}, banner)
+
+	// 限制长度
+	if len(cleaned) > 500 {
+		return cleaned[:500] + "..."
+	}
+
+	return strings.TrimSpace(cleaned)
 }

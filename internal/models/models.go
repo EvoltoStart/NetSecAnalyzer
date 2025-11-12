@@ -32,6 +32,8 @@ type Packet struct {
 	DstPort        int       `json:"dst_port,omitempty"`
 	Length         int       `json:"length"`
 	Payload        []byte    `gorm:"type:blob" json:"payload,omitempty"`
+	PayloadPath    string    `gorm:"size:500" json:"payload_path,omitempty"`      // Payload 文件路径
+	PayloadHash    string    `gorm:"size:64;index" json:"payload_hash,omitempty"` // Payload SHA256 哈希
 	AnalysisResult JSON      `gorm:"type:json" json:"analysis_result,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
@@ -53,18 +55,19 @@ type Vulnerability struct {
 
 // ScanTask 扫描任务
 type ScanTask struct {
-	ID        uint       `gorm:"primaryKey" json:"id"`
-	Name      string     `gorm:"size:255;not null" json:"name"`
-	Target    string     `gorm:"size:500;not null" json:"target"`
-	ScanType  string     `gorm:"size:50;not null" json:"scan_type"`    // port, vuln, service
-	Status    string     `gorm:"size:50;not null;index" json:"status"` // pending, running, completed, failed
-	Progress  int        `json:"progress"`                             // 0-100
-	Result    JSON       `gorm:"type:json" json:"result,omitempty"`
-	Error     string     `gorm:"type:text" json:"error,omitempty"`
-	StartTime *time.Time `json:"start_time,omitempty"`
-	EndTime   *time.Time `json:"end_time,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	Name        string     `gorm:"size:255;not null" json:"name"`
+	Target      string     `gorm:"size:500;not null" json:"target"`
+	ScanType    string     `gorm:"size:50;not null" json:"scan_type"`      // port, vuln, service, can, rs485
+	NetworkType string     `gorm:"size:50;default:ip" json:"network_type"` // ip, can, rs485
+	Status      string     `gorm:"size:50;not null;index" json:"status"`   // pending, running, completed, failed
+	Progress    int        `json:"progress"`                               // 0-100
+	Result      JSON       `gorm:"type:json" json:"result,omitempty"`
+	Error       string     `gorm:"type:text" json:"error,omitempty"`
+	StartTime   *time.Time `json:"start_time,omitempty"`
+	EndTime     *time.Time `json:"end_time,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // AttackLog 攻击操作日志
@@ -92,6 +95,30 @@ type ProtocolStat struct {
 	FirstSeen   time.Time `json:"first_seen"`
 	LastSeen    time.Time `json:"last_seen"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ScanResult 扫描结果
+type ScanResult struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	TaskID      uint      `gorm:"not null;index" json:"task_id"`
+	ResultType  string    `gorm:"size:50;not null;index" json:"result_type"` // port, service, vulnerability, can_id, modbus_device, topology
+	Target      string    `gorm:"size:500" json:"target,omitempty"`          // 目标（IP/接口/端口）
+	Port        int       `json:"port,omitempty"`
+	Protocol    string    `gorm:"size:20" json:"protocol,omitempty"`
+	State       string    `gorm:"size:20" json:"state,omitempty"`
+	Service     string    `gorm:"size:100" json:"service,omitempty"`
+	Version     string    `gorm:"size:255" json:"version,omitempty"`
+	Banner      string    `gorm:"type:text" json:"banner,omitempty"`
+	VulnType    string    `gorm:"size:100" json:"vuln_type,omitempty"`
+	Severity    string    `gorm:"size:20;index" json:"severity,omitempty"`
+	Title       string    `gorm:"size:255" json:"title,omitempty"`
+	Description string    `gorm:"type:text" json:"description,omitempty"`
+	Solution    string    `gorm:"type:text" json:"solution,omitempty"`
+	CVE         string    `gorm:"size:50" json:"cve,omitempty"`
+	CVSS        float64   `json:"cvss,omitempty"`
+	Details     JSON      `gorm:"type:json" json:"details,omitempty"` // 详细信息（CAN/Modbus 特定数据）
+	ExtraData   JSON      `gorm:"type:json" json:"extra_data,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // JSON 自定义 JSON 类型

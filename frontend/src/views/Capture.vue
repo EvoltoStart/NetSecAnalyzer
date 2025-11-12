@@ -242,10 +242,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
+import wsClient from '@/utils/websocket'
 
 const router = useRouter()
 
@@ -425,9 +426,59 @@ const getStatusType = (status) => {
   return typeMap[status] || 'info'
 }
 
+// WebSocket 连接和监听
+const setupWebSocket = () => {
+  // 连接 WebSocket
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.hostname}:${window.location.port}/api/ws`
+  wsClient.connect(wsUrl)
+
+  // 监听连接状态
+  wsClient.on('connected', () => {
+    console.log('WebSocket connected')
+  })
+
+  wsClient.on('disconnected', () => {
+    console.log('WebSocket disconnected')
+  })
+
+  // 监听实时数据包
+  wsClient.on('packet', (data) => {
+    // 更新对应会话的数据包计数
+    const session = sessions.value.find(s => s.id === data.session_id)
+    if (session) {
+      session.packet_count = (session.packet_count || 0) + 1
+    }
+  })
+
+  // 监听统计信息
+  wsClient.on('stats', (data) => {
+    const session = sessions.value.find(s => s.id === data.session_id)
+    if (session) {
+      session.packet_count = data.packet_count
+    }
+  })
+
+  // 监听完成消息
+  wsClient.on('completed', (data) => {
+    const session = sessions.value.find(s => s.id === data.session_id)
+    if (session) {
+      session.status = 'completed'
+      session.packet_count = data.packet_count
+    }
+    ElMessage.success(`会话 ${data.session_id} 采集完成`)
+  })
+}
+
 onMounted(() => {
   loadInterfaces()
   loadSessions()
+  setupWebSocket()
+})
+
+onUnmounted(() => {
+  // 清理 WebSocket 连接
+  wsClient.close()
 })
 </script>
 

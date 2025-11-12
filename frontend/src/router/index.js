@@ -40,6 +40,12 @@ const router = createRouter({
           meta: { title: '漏洞扫描' }
         },
         {
+          path: 'scan/results/:id',
+          name: 'ScanResults',
+          component: () => import('@/views/ScanResults.vue'),
+          meta: { title: '扫描结果' }
+        },
+        {
           path: 'attack',
           name: 'Attack',
           component: () => import('@/views/Attack.vue'),

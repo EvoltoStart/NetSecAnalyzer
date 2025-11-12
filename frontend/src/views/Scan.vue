@@ -10,34 +10,122 @@
         </div>
       </template>
 
-      <el-form :model="scanForm" label-width="120px">
-        <el-form-item label="目标地址">
-          <el-input v-model="scanForm.target" placeholder="IP 地址或域名" />
+      <el-form :model="scanForm" label-width="120px" :rules="formRules" ref="scanFormRef">
+        <el-form-item label="任务名称" prop="name">
+          <el-input v-model="scanForm.name" placeholder="输入任务名称（可选）" clearable />
         </el-form-item>
 
-        <el-form-item label="端口范围">
-          <el-input v-model="scanForm.portRange" placeholder="例如: 1-1024" />
-        </el-form-item>
-
-        <el-form-item label="扫描类型">
-          <el-radio-group v-model="scanForm.scanType">
-            <el-radio label="port">端口扫描</el-radio>
-            <el-radio label="service">服务识别</el-radio>
-            <el-radio label="vuln">漏洞检测</el-radio>
+        <el-form-item label="网络类型" prop="networkType">
+          <el-radio-group v-model="scanForm.networkType" @change="onNetworkTypeChange">
+            <el-radio label="ip">IP 网络</el-radio>
+            <el-radio label="can">CAN 总线</el-radio>
+            <el-radio label="rs485">RS-485 总线</el-radio>
           </el-radio-group>
         </el-form-item>
+
+        <!-- IP 网络配置 -->
+        <template v-if="scanForm.networkType === 'ip'">
+          <el-form-item label="目标地址" prop="target" required>
+            <el-input
+              v-model="scanForm.target"
+              placeholder="例如: 192.168.1.1 或 example.com"
+              clearable
+            />
+          </el-form-item>
+
+          <el-form-item label="端口范围" prop="portRange">
+            <el-input
+              v-model="scanForm.portRange"
+              placeholder="例如: 1-1024 或 80,443,8080"
+              clearable
+            />
+          </el-form-item>
+
+          <el-form-item label="扫描类型" prop="scanType">
+            <el-radio-group v-model="scanForm.scanType">
+              <el-radio label="port">端口扫描</el-radio>
+              <el-radio label="service">服务识别</el-radio>
+              <el-radio label="vuln">漏洞检测</el-radio>
+            </el-radio-group>
+          </el-form-item>
+        </template>
+
+        <!-- CAN 总线配置 -->
+        <template v-else-if="scanForm.networkType === 'can'">
+          <el-form-item label="CAN 接口">
+            <el-input v-model="scanForm.canInterface" placeholder="例如: can0" />
+          </el-form-item>
+
+          <el-form-item label="扫描时长">
+            <el-input-number v-model="scanForm.canDuration" :min="10" :max="300" /> 秒
+          </el-form-item>
+
+          <el-form-item label="扫描类型">
+            <el-radio-group v-model="scanForm.scanType">
+              <el-radio label="can">被动扫描</el-radio>
+            </el-radio-group>
+          </el-form-item>
+        </template>
+
+        <!-- RS-485 总线配置 -->
+        <template v-else-if="scanForm.networkType === 'rs485'">
+          <el-form-item label="串口">
+            <el-input v-model="scanForm.rs485Port" placeholder="例如: /dev/ttyUSB0" />
+          </el-form-item>
+
+          <el-form-item label="波特率">
+            <el-select v-model="scanForm.rs485BaudRate">
+              <el-option label="9600" :value="9600" />
+              <el-option label="19200" :value="19200" />
+              <el-option label="38400" :value="38400" />
+              <el-option label="57600" :value="57600" />
+              <el-option label="115200" :value="115200" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="地址范围">
+            <el-col :span="11">
+              <el-input-number v-model="scanForm.rs485StartAddr" :min="1" :max="247" />
+            </el-col>
+            <el-col :span="2" style="text-align: center">-</el-col>
+            <el-col :span="11">
+              <el-input-number v-model="scanForm.rs485EndAddr" :min="1" :max="247" />
+            </el-col>
+          </el-form-item>
+
+          <el-form-item label="扫描类型">
+            <el-radio-group v-model="scanForm.scanType">
+              <el-radio label="rs485">Modbus 设备扫描</el-radio>
+            </el-radio-group>
+          </el-form-item>
+        </template>
       </el-form>
     </el-card>
 
     <el-card style="margin-top: 20px">
       <template #header>
-        <span>扫描任务</span>
+        <div class="card-header">
+          <span>扫描任务 ({{ tasks.length }})</span>
+          <el-button size="small" @click="loadTasks">
+            <el-icon><Refresh /></el-icon> 刷新
+          </el-button>
+        </div>
       </template>
 
       <el-empty v-if="!loading && tasks.length === 0" description="暂无扫描任务" />
       <el-table v-else :data="tasks" stripe v-loading="loading">
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="name" label="名称" width="150">
+          <template #default="{ row }">
+            {{ row.name || row.target }}
+          </template>
+        </el-table-column>
         <el-table-column prop="target" label="目标" />
-        <el-table-column prop="scanType" label="类型" width="120" />
+        <el-table-column prop="scan_type" label="类型" width="120">
+          <template #default="{ row }">
+            <el-tag size="small">{{ row.scan_type }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
@@ -45,7 +133,18 @@
         </el-table-column>
         <el-table-column prop="progress" label="进度" width="150">
           <template #default="{ row }">
-            <el-progress :percentage="row.progress" />
+            <el-progress :percentage="row.progress || 0" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" @click="viewResults(row.id)">查看结果</el-button>
+            <el-button size="small" type="danger" @click="deleteTask(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -55,14 +154,52 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search, Refresh } from '@element-plus/icons-vue'
 import axios from 'axios'
 
+const router = useRouter()
+
+const scanFormRef = ref(null)
+
 const scanForm = ref({
+  name: '',
+  networkType: 'ip',
   target: '',
   portRange: '1-1024',
-  scanType: 'port'
+  scanType: 'port',
+  // CAN 配置
+  canInterface: 'can0',
+  canDuration: 30,
+  // RS-485 配置
+  rs485Port: '/dev/ttyUSB0',
+  rs485BaudRate: 9600,
+  rs485StartAddr: 1,
+  rs485EndAddr: 247
 })
+
+const formRules = {
+  target: [
+    { required: true, message: '请输入目标地址', trigger: 'blur' }
+  ],
+  portRange: [
+    { required: true, message: '请输入端口范围', trigger: 'blur' }
+  ]
+}
+
+// 网络类型切换
+const onNetworkTypeChange = (type) => {
+  if (type === 'can') {
+    scanForm.value.scanType = 'can'
+    scanForm.value.target = scanForm.value.canInterface
+  } else if (type === 'rs485') {
+    scanForm.value.scanType = 'rs485'
+    scanForm.value.target = scanForm.value.rs485Port
+  } else {
+    scanForm.value.scanType = 'port'
+  }
+}
 
 const tasks = ref([])
 const loading = ref(false)
@@ -72,32 +209,120 @@ const loadTasks = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/scan/tasks')
-    tasks.value = res.data.data || []
+    console.log('任务列表响应:', res.data)
+    // 后端返回 {tasks: [...]}，不是 {data: [...]}
+    tasks.value = res.data.tasks || res.data.data || []
+    console.log('加载的任务数量:', tasks.value.length)
   } catch (error) {
-    console.error('Failed to load scan tasks:', error)
+    console.error('加载任务列表失败:', error)
+    ElMessage.error('加载任务列表失败: ' + (error.response?.data?.error || error.message))
   } finally {
     loading.value = false
   }
 }
 
 const startScan = async () => {
-  if (!scanForm.value.target) {
+  // 验证输入
+  if (!scanForm.value.target || scanForm.value.target.trim() === '') {
     ElMessage.warning('请输入目标地址')
     return
   }
 
+  // 根据网络类型验证
+  if (scanForm.value.networkType === 'ip') {
+    if (!scanForm.value.portRange) {
+      ElMessage.warning('请输入端口范围')
+      return
+    }
+  } else if (scanForm.value.networkType === 'can') {
+    if (!scanForm.value.canInterface) {
+      ElMessage.warning('请输入 CAN 接口')
+      return
+    }
+  } else if (scanForm.value.networkType === 'rs485') {
+    if (!scanForm.value.rs485Port) {
+      ElMessage.warning('请输入串口')
+      return
+    }
+  }
+
   try {
-    await axios.post('/api/scan/start', {
-      target: scanForm.value.target,
-      port_range: scanForm.value.portRange,
-      scan_type: scanForm.value.scanType
+    // 显示加载提示
+    const loadingMsg = ElMessage.info('正在启动扫描...')
+
+    const payload = {
+      target: scanForm.value.target.trim(),
+      scan_type: scanForm.value.scanType,
+      network_type: scanForm.value.networkType,
+      config: {}
+    }
+
+    // 根据网络类型添加配置
+    if (scanForm.value.networkType === 'ip') {
+      payload.port_range = scanForm.value.portRange
+    } else if (scanForm.value.networkType === 'can') {
+      payload.config.interface = scanForm.value.canInterface
+      payload.config.duration = scanForm.value.canDuration
+      payload.target = scanForm.value.canInterface
+    } else if (scanForm.value.networkType === 'rs485') {
+      payload.config.port = scanForm.value.rs485Port
+      payload.config.baud_rate = scanForm.value.rs485BaudRate
+      payload.config.start_addr = scanForm.value.rs485StartAddr
+      payload.config.end_addr = scanForm.value.rs485EndAddr
+      payload.target = scanForm.value.rs485Port
+    }
+
+    console.log('发送扫描请求:', payload)
+
+    const response = await axios.post('/api/scan/start', payload)
+
+    console.log('扫描响应:', response.data)
+
+    loadingMsg.close()
+    ElMessage.success({
+      message: `扫描已启动！任务 ID: ${response.data.task_id}`,
+      duration: 3000
     })
 
-    ElMessage.success('扫描已启动')
     // 重新加载任务列表
-    setTimeout(loadTasks, 1000)
+    await loadTasks()
   } catch (error) {
-    ElMessage.error('启动扫描失败')
+    console.error('扫描启动失败:', error)
+    console.error('错误详情:', error.response)
+
+    let errorMsg = '未知错误'
+    if (error.response?.data?.error) {
+      errorMsg = error.response.data.error
+    } else if (error.message) {
+      errorMsg = error.message
+    }
+
+    ElMessage.error({
+      message: `启动扫描失败: ${errorMsg}`,
+      duration: 5000
+    })
+  }
+}
+
+// 查看扫描结果
+const viewResults = (taskId) => {
+  router.push(`/scan/results/${taskId}`)
+}
+
+// 删除任务
+const deleteTask = async (taskId) => {
+  try {
+    await ElMessageBox.confirm('确定要删除此扫描任务吗？', '确认删除', {
+      type: 'warning'
+    })
+
+    await axios.delete(`/api/scan/tasks/${taskId}`)
+    ElMessage.success('删除成功')
+    loadTasks()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败: ' + (error.response?.data?.error || error.message))
+    }
   }
 }
 
@@ -111,7 +336,26 @@ const getStatusType = (status) => {
   return typeMap[status] || 'info'
 }
 
+// 格式化时间
+const formatTime = (timeStr) => {
+  if (!timeStr) return '-'
+  try {
+    const date = new Date(timeStr)
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    })
+  } catch (error) {
+    return timeStr
+  }
+}
+
 onMounted(() => {
+  console.log('扫描页面已挂载，开始加载任务列表')
   loadTasks()
   // 每10秒刷新任务列表
   setInterval(loadTasks, 10000)

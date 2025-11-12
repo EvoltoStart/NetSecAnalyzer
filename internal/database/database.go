@@ -27,7 +27,7 @@ func InitDB(cfg *config.DatabaseConfig) error {
 
 	var err error
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Warn), // 只打印警告和错误，不打印所有 SQL
 	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
@@ -58,6 +58,7 @@ func autoMigrate() error {
 		&models.Packet{},
 		&models.Vulnerability{},
 		&models.ScanTask{},
+		&models.ScanResult{},
 		&models.AttackLog{},
 		&models.ProtocolStat{},
 	)

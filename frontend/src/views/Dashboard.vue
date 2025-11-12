@@ -81,7 +81,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import VChart from 'vue-echarts'
@@ -94,6 +94,7 @@ import {
   LegendComponent,
   GridComponent
 } from 'echarts/components'
+import wsClient from '@/utils/websocket'
 
 use([
   CanvasRenderer,
@@ -220,17 +221,46 @@ const loadTrafficTrend = async () => {
   }
 }
 
+// WebSocket 实时更新
+const setupWebSocket = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.hostname}:${window.location.port}/api/ws`
+  wsClient.connect(wsUrl)
+
+  // 监听统计信息更新
+  wsClient.on('stats', () => {
+    // 有新的统计数据时刷新
+    loadOverviewStats()
+  })
+
+  // 监听数据包事件
+  wsClient.on('packet', () => {
+    // 实时增加数据包计数
+    stats.value.totalPackets++
+  })
+}
+
+let refreshTimer = null
+
 onMounted(() => {
   loadOverviewStats()
   loadProtocolDistribution()
   loadTrafficTrend()
+  setupWebSocket()
 
   // 定时刷新数据
-  setInterval(() => {
+  refreshTimer = setInterval(() => {
     loadOverviewStats()
     loadProtocolDistribution()
     loadTrafficTrend()
   }, 30000) // 每30秒刷新一次
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
+  wsClient.close()
 })
 </script>
 

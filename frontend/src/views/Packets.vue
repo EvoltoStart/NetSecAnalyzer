@@ -5,6 +5,18 @@
         <div class="card-header">
           <span>数据包列表 - 会话 #{{ sessionId }}</span>
           <div>
+            <el-dropdown @command="handleExport" style="margin-right: 10px">
+              <el-button type="success">
+                <el-icon><Download /></el-icon> 导出
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="pcap">导出为 PCAP</el-dropdown-item>
+                  <el-dropdown-item command="csv">导出为 CSV</el-dropdown-item>
+                  <el-dropdown-item command="json">导出为 JSON</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button @click="goBack">
               <el-icon><ArrowLeft /></el-icon> 返回
             </el-button>
@@ -52,13 +64,14 @@
       </el-form>
 
       <!-- 数据包表格 -->
-      <el-table 
-        :data="packets" 
-        stripe 
+      <el-table
+        :data="packets"
+        stripe
         border
         v-loading="loading"
         @row-click="viewPacketDetail"
         style="cursor: pointer"
+        :row-class-name="getRowClassName"
       >
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="timestamp" label="时间戳" width="180">
@@ -69,6 +82,19 @@
         <el-table-column prop="protocol" label="协议" width="100">
           <template #default="{ row }">
             <el-tag size="small">{{ row.protocol }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="分析结果" width="200">
+          <template #default="{ row }">
+            <div v-if="row.analysis_result">
+              <el-tag size="small" type="success">
+                {{ row.analysis_result.protocol || row.protocol }}
+              </el-tag>
+              <el-tag v-if="row.analysis_result.anomalies" size="small" type="danger" style="margin-left: 5px">
+                异常
+              </el-tag>
+            </div>
+            <el-tag v-else size="small" type="info">未分析</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="src_addr" label="源地址" width="150" />
@@ -120,9 +146,62 @@
         <el-descriptions-item label="目标端口">{{ currentPacket.dst_port || 'N/A' }}</el-descriptions-item>
       </el-descriptions>
 
-      <el-divider>分析结果</el-divider>
-      <pre v-if="currentPacket?.analysis_result" style="background: #f5f5f5; padding: 10px; border-radius: 4px; max-height: 300px; overflow: auto;">{{ JSON.stringify(currentPacket.analysis_result, null, 2) }}</pre>
-      <div v-else style="color: #999; text-align: center; padding: 20px;">暂无分析结果</div>
+      <el-divider>协议分析结果</el-divider>
+      <div v-if="currentPacket?.analysis_result">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="识别协议">
+            <el-tag type="success">{{ currentPacket.analysis_result.protocol }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="版本" v-if="currentPacket.analysis_result.version">
+            {{ currentPacket.analysis_result.version }}
+          </el-descriptions-item>
+          <el-descriptions-item label="方法" v-if="currentPacket.analysis_result.method">
+            <el-tag>{{ currentPacket.analysis_result.method }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="URI" v-if="currentPacket.analysis_result.uri" :span="2">
+            {{ currentPacket.analysis_result.uri }}
+          </el-descriptions-item>
+          <el-descriptions-item label="状态码" v-if="currentPacket.analysis_result.status_code">
+            <el-tag :type="currentPacket.analysis_result.status_code >= 400 ? 'danger' : 'success'">
+              {{ currentPacket.analysis_result.status_code }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="摘要" :span="2">
+            {{ currentPacket.analysis_result.summary }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 异常检测结果 -->
+        <div v-if="currentPacket.analysis_result.anomalies && currentPacket.analysis_result.anomalies.length > 0" style="margin-top: 15px;">
+          <el-alert
+            title="检测到异常"
+            type="warning"
+            :closable="false"
+            style="margin-bottom: 10px"
+          >
+            <ul style="margin: 5px 0; padding-left: 20px;">
+              <li v-for="(anomaly, index) in currentPacket.analysis_result.anomalies" :key="index">
+                {{ anomaly }}
+              </li>
+            </ul>
+          </el-alert>
+        </div>
+
+        <!-- 详细字段 -->
+        <div v-if="currentPacket.analysis_result.fields && Object.keys(currentPacket.analysis_result.fields).length > 0" style="margin-top: 15px;">
+          <el-divider content-position="left">详细字段</el-divider>
+          <el-table :data="formatFields(currentPacket.analysis_result.fields)" border size="small">
+            <el-table-column prop="key" label="字段" width="200" />
+            <el-table-column prop="value" label="值" />
+          </el-table>
+        </div>
+      </div>
+      <div v-else style="color: #999; text-align: center; padding: 20px;">
+        <p>暂无分析结果</p>
+        <el-button size="small" type="primary" @click="analyzePacket" :loading="analyzing">
+          立即分析
+        </el-button>
+      </div>
 
       <el-divider>原始数据 (Hex)</el-divider>
       <div v-if="currentPacket?.payload" style="background: #f5f5f5; padding: 10px; border-radius: 4px; max-height: 200px; overflow: auto; font-family: monospace; word-break: break-all;">
@@ -141,6 +220,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Download } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 const route = useRoute()
@@ -152,6 +232,7 @@ const packets = ref([])
 const loading = ref(false)
 const detailVisible = ref(false)
 const currentPacket = ref(null)
+const analyzing = ref(false)
 
 const filter = ref({
   protocol: '',
@@ -226,6 +307,43 @@ const goBack = () => {
   router.push('/capture')
 }
 
+// 导出数据
+const handleExport = async (format) => {
+  try {
+    ElMessage.info(`正在导出为 ${format.toUpperCase()} 格式...`)
+
+    const response = await axios.get(`/api/capture/sessions/${sessionId.value}/export`, {
+      params: { format },
+      responseType: 'blob'
+    })
+
+    // 创建下载链接
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+
+    // 从响应头获取文件名
+    const contentDisposition = response.headers['content-disposition']
+    let filename = `session_${sessionId.value}.${format}`
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/)
+      if (filenameMatch) {
+        filename = filenameMatch[1]
+      }
+    }
+
+    link.setAttribute('download', filename)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+
+    ElMessage.success('导出成功')
+  } catch (error) {
+    ElMessage.error('导出失败: ' + (error.response?.data?.error || error.message))
+  }
+}
+
 // 格式化时间
 const formatTime = (timestamp) => {
   if (!timestamp) return 'N/A'
@@ -271,6 +389,46 @@ const getStatusType = (status) => {
   return typeMap[status] || 'info'
 }
 
+// 获取行类名（异常数据包高亮）
+const getRowClassName = ({ row }) => {
+  if (row.analysis_result && row.analysis_result.anomalies && row.analysis_result.anomalies.length > 0) {
+    return 'anomaly-row'
+  }
+  return ''
+}
+
+// 格式化字段为表格数据
+const formatFields = (fields) => {
+  if (!fields || typeof fields !== 'object') return []
+  return Object.entries(fields).map(([key, value]) => ({
+    key,
+    value: typeof value === 'object' ? JSON.stringify(value) : String(value)
+  }))
+}
+
+// 分析数据包
+const analyzePacket = async () => {
+  if (!currentPacket.value) return
+
+  analyzing.value = true
+  try {
+    const res = await axios.get(`/api/analyze/packets/${currentPacket.value.id}/result`)
+    currentPacket.value.analysis_result = res.data.analysis
+
+    // 更新列表中的数据包
+    const index = packets.value.findIndex(p => p.id === currentPacket.value.id)
+    if (index !== -1) {
+      packets.value[index].analysis_result = res.data.analysis
+    }
+
+    ElMessage.success('分析完成')
+  } catch (error) {
+    ElMessage.error('分析失败: ' + (error.response?.data?.error || error.message))
+  } finally {
+    analyzing.value = false
+  }
+}
+
 onMounted(() => {
   loadSession()
   loadPackets()
@@ -286,5 +444,13 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+:deep(.anomaly-row) {
+  background-color: #fef0f0 !important;
+}
+
+:deep(.anomaly-row:hover) {
+  background-color: #fde2e2 !important;
 }
 </style>
