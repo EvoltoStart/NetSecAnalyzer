@@ -17,6 +17,7 @@ type Router struct {
 	analyzeHandler *AnalyzeHandler
 	scanHandler    *ScanHandler
 	attackHandler  *AttackHandler
+	defenseHandler *DefenseHandler
 	statsHandler   *StatsHandler
 }
 
@@ -35,6 +36,7 @@ func NewRouter(mode string) *Router {
 	analyzeHandler := NewAnalyzeHandler(analyzer.NewAnalyzer())
 	scanHandler := NewScanHandler(scanner.NewScanner(100, 5*time.Second, 1000))
 	attackHandler := NewAttackHandler(attack.NewAttackManager(true, 100))
+	defenseHandler := NewDefenseHandler()
 	statsHandler := NewStatsHandler()
 
 	router := &Router{
@@ -43,6 +45,7 @@ func NewRouter(mode string) *Router {
 		analyzeHandler: analyzeHandler,
 		scanHandler:    scanHandler,
 		attackHandler:  attackHandler,
+		defenseHandler: defenseHandler,
 		statsHandler:   statsHandler,
 	}
 
@@ -106,6 +109,18 @@ func (r *Router) setupRoutes() {
 		{
 			attack.POST("/replay", r.attackHandler.ReplayPackets)
 			attack.POST("/fuzz", r.attackHandler.StartFuzzing)
+			attack.GET("/tasks", r.attackHandler.GetTasks)
+			attack.GET("/tasks/:id", r.attackHandler.GetTask)
+			attack.POST("/tasks/:id/stop", r.attackHandler.StopTask)
+			attack.DELETE("/tasks/:id", r.attackHandler.DeleteTask)
+		}
+
+		// 防御模拟
+		defense := api.Group("/defense")
+		{
+			defense.POST("/ids/start", r.defenseHandler.StartIDS)
+			defense.POST("/ids/:id/stop", r.defenseHandler.StopIDS)
+			defense.GET("/ids/tasks", r.defenseHandler.GetIDSTasks)
 		}
 
 		// 统计数据

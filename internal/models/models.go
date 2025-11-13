@@ -85,6 +85,38 @@ type AttackLog struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// AttackTask 攻击任务
+type AttackTask struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	TaskID      string     `gorm:"size:100;uniqueIndex;not null" json:"task_id"`
+	Type        string     `gorm:"size:50;not null;index" json:"type"`   // replay, fuzzing
+	Target      string     `gorm:"size:500;not null" json:"target"`      // 目标地址或接口
+	Status      string     `gorm:"size:50;not null;index" json:"status"` // running, completed, failed, stopped
+	Progress    int        `json:"progress"`                             // 0-100
+	Parameters  JSON       `gorm:"type:json" json:"parameters,omitempty"`
+	Result      JSON       `gorm:"type:json" json:"result,omitempty"`
+	UserID      string     `gorm:"size:100;index" json:"user_id"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// DefenseTask 防御任务
+type DefenseTask struct {
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	TaskID         string     `gorm:"size:100;uniqueIndex;not null" json:"task_id"`
+	Type           string     `gorm:"size:50;not null;index" json:"type"`   // ids, firewall, filter
+	Interface      string     `gorm:"size:100" json:"interface"`            // 监听接口
+	Status         string     `gorm:"size:50;not null;index" json:"status"` // running, stopped
+	Parameters     JSON       `gorm:"type:json" json:"parameters,omitempty"`
+	EventsDetected int        `json:"events_detected"`                          // 检测到的事件数
+	AlertsCount    int        `json:"alerts_count"`                             // 告警数
+	BlocksCount    int        `json:"blocks_count"`                             // 阻断数
+	RecentAlerts   JSON       `gorm:"type:json" json:"recent_alerts,omitempty"` // 最近的告警
+	UserID         string     `gorm:"size:100;index" json:"user_id"`
+	CreatedAt      time.Time  `json:"created_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+}
+
 // ProtocolStat 协议统计
 type ProtocolStat struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`

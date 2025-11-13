@@ -65,6 +65,8 @@ func autoMigrate() error {
 		&models.ScanTask{},
 		&models.ScanResult{},
 		&models.AttackLog{},
+		&models.AttackTask{},
+		&models.DefenseTask{},
 		&models.ProtocolStat{},
 	)
 }
