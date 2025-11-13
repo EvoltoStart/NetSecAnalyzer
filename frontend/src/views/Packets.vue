@@ -235,9 +235,9 @@ const currentPacket = ref(null)
 const analyzing = ref(false)
 
 const filter = ref({
-  protocol: '',
-  srcAddr: '',
-  dstAddr: ''
+  protocol: route.query.protocol || '',
+  srcAddr: route.query.srcAddr || '',
+  dstAddr: route.query.dstAddr || ''
 })
 
 const pagination = ref({
@@ -264,12 +264,18 @@ const loadPackets = async () => {
       page: pagination.value.page,
       page_size: pagination.value.pageSize
     }
-    
+
     if (filter.value.protocol) params.protocol = filter.value.protocol
     if (filter.value.srcAddr) params.src_addr = filter.value.srcAddr
     if (filter.value.dstAddr) params.dst_addr = filter.value.dstAddr
 
+    console.log('=== loadPackets ===')
+    console.log('filter:', filter.value)
+    console.log('params:', params)
+
     const res = await axios.get(`/api/capture/sessions/${sessionId.value}/packets`, { params })
+    console.log('response:', res.data)
+
     packets.value = res.data.data || []
     pagination.value.total = res.data.total || 0
   } catch (error) {

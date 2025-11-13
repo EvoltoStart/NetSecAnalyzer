@@ -192,38 +192,71 @@
 
     <el-card style="margin-top: 20px">
       <template #header>
-        <span>采集会话列表</span>
+        <div class="card-header">
+          <span>采集会话列表</span>
+          <el-button @click="loadSessions" :loading="sessionsLoading">
+            <el-icon><Refresh /></el-icon> 刷新
+          </el-button>
+        </div>
       </template>
 
-      <el-table :data="sessions" stripe>
+      <el-table :data="sessions" stripe v-loading="sessionsLoading">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="名称" />
+        <el-table-column prop="name" label="名称" min-width="150" show-overflow-tooltip />
         <el-table-column prop="type" label="类型" width="100">
           <template #default="{ row }">
             <el-tag>{{ row.type.toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="packet_count" label="数据包数量" width="120" />
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="packet_count" label="数据包数量" width="120">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
+            {{ row.packet_count || 0 }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getStatusType(row.status)">
+              {{ getStatusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="开始时间" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.start_time) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="持续时间" width="120">
+          <template #default="{ row }">
+            {{ getDuration(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'running'"
               size="small"
               type="danger"
               @click="stopCapture(row.id)"
+              :loading="stoppingSessionId === row.id"
             >
-              停止
+              <el-icon><VideoPause /></el-icon> 停止
             </el-button>
             <el-button size="small" @click="viewPackets(row.id)">
-              查看数据包
+              <el-icon><View /></el-icon> 查看数据包
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              @click="confirmDeleteSession(row)"
+              :disabled="row.status === 'running'"
+            >
+              <el-icon><Delete /></el-icon> 删除
             </el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <el-empty description="暂无采集会话" />
+        </template>
       </el-table>
     </el-card>
 
@@ -244,7 +277,8 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { VideoPlay, VideoPause, Refresh, View, Delete } from '@element-plus/icons-vue'
 import axios from 'axios'
 import wsClient from '@/utils/websocket'
 
@@ -282,6 +316,8 @@ const interfaces = ref([]) // 从后端动态加载
 const serialPorts = ref(['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyS0']) // 串口列表
 const sessions = ref([])
 const isCapturing = ref(false)
+const sessionsLoading = ref(false)
+const stoppingSessionId = ref(null)
 
 // BPF 过滤器模板
 const filterTemplates = [
@@ -314,11 +350,18 @@ const loadInterfaces = async () => {
 }
 
 const loadSessions = async () => {
+  sessionsLoading.value = true
   try {
     const res = await axios.get('/api/capture/sessions')
     sessions.value = res.data.data || []
+
+    // 检查是否有正在运行的会话
+    const runningSession = sessions.value.find(s => s.status === 'running')
+    isCapturing.value = !!runningSession
   } catch (error) {
-    ElMessage.error('加载会话列表失败')
+    ElMessage.error('加载会话列表失败: ' + (error.response?.data?.error || error.message))
+  } finally {
+    sessionsLoading.value = false
   }
 }
 
@@ -341,19 +384,39 @@ const selectFilterTemplate = (row) => {
 }
 
 const startCapture = async () => {
-  if (!captureForm.value.name) {
+  console.log('=== startCapture called ===')
+  console.log('captureForm:', captureForm.value)
+
+  // 验证表单
+  if (!captureForm.value.name || !captureForm.value.name.trim()) {
     ElMessage.warning('请输入会话名称')
     return
   }
 
-  if (!captureForm.value.interface && captureForm.value.type === 'ip') {
+  if (captureForm.value.type === 'ip' && !captureForm.value.interface) {
     ElMessage.warning('请选择网络接口')
+    return
+  }
+
+  if (captureForm.value.type === 'can' && !captureForm.value.canInterface) {
+    ElMessage.warning('请选择 CAN 接口')
+    return
+  }
+
+  if (captureForm.value.type === 'rs485' && !captureForm.value.serialPort) {
+    ElMessage.warning('请选择串口')
+    return
+  }
+
+  // 检查是否已有运行中的会话
+  if (isCapturing.value) {
+    ElMessage.warning('已有采集任务正在运行，请先停止当前任务')
     return
   }
 
   try {
     let config = {}
-    
+
     // 根据采集类型构建配置
     if (captureForm.value.type === 'ip') {
       config = {
@@ -383,33 +446,76 @@ const startCapture = async () => {
     }
 
     const response = await axios.post('/api/capture/start', {
-      name: captureForm.value.name,
+      name: captureForm.value.name.trim(),
       type: captureForm.value.type,
       config: config,
-      filter: captureForm.value.filter
+      filter: captureForm.value.filter || ''
     })
 
-    ElMessage.success('采集已启动，会话ID: ' + response.data.session_id)
+    ElMessage.success({
+      message: `采集已启动！会话 ID: ${response.data.session_id}`,
+      duration: 3000
+    })
+
     isCapturing.value = true
-    loadSessions()
-    
+    await loadSessions()
+
     // 清空表单
     captureForm.value.name = ''
     captureForm.value.filter = ''
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message
-    ElMessage.error('启动采集失败: ' + errorMsg)
+    ElMessage.error({
+      message: '启动采集失败: ' + errorMsg,
+      duration: 5000
+    })
     console.error('Start capture error:', error.response?.data)
   }
 }
 
 const stopCapture = async (sessionId) => {
+  stoppingSessionId.value = sessionId
   try {
     await axios.post(`/api/capture/stop?session_id=${sessionId}`)
     ElMessage.success('采集已停止')
-    loadSessions()
+    isCapturing.value = false
+    await loadSessions()
   } catch (error) {
-    ElMessage.error('停止采集失败')
+    ElMessage.error('停止采集失败: ' + (error.response?.data?.error || error.message))
+  } finally {
+    stoppingSessionId.value = null
+  }
+}
+
+// 确认删除会话
+const confirmDeleteSession = async (session) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除会话 "${session.name}" 吗？这将删除该会话的所有数据包记录。`,
+      '删除确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    await deleteSession(session.id)
+  } catch (error) {
+    // 用户取消删除
+    if (error !== 'cancel') {
+      console.error('Delete session error:', error)
+    }
+  }
+}
+
+// 删除会话
+const deleteSession = async (sessionId) => {
+  try {
+    await axios.delete(`/api/capture/sessions/${sessionId}`)
+    ElMessage.success('会话已删除')
+    await loadSessions()
+  } catch (error) {
+    ElMessage.error('删除会话失败: ' + (error.response?.data?.error || error.message))
   }
 }
 
@@ -424,6 +530,49 @@ const getStatusType = (status) => {
     completed: 'info'
   }
   return typeMap[status] || 'info'
+}
+
+const getStatusText = (status) => {
+  const textMap = {
+    running: '运行中',
+    stopped: '已停止',
+    completed: '已完成'
+  }
+  return textMap[status] || status
+}
+
+// 格式化时间
+const formatTime = (timestamp) => {
+  if (!timestamp) return 'N/A'
+  return new Date(timestamp).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
+// 计算持续时间
+const getDuration = (session) => {
+  if (!session.start_time) return 'N/A'
+
+  const start = new Date(session.start_time)
+  const end = session.end_time ? new Date(session.end_time) : new Date()
+
+  const durationMs = end - start
+  const seconds = Math.floor(durationMs / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`
+  } else {
+    return `${seconds}s`
+  }
 }
 
 // WebSocket 连接和监听
@@ -470,15 +619,30 @@ const setupWebSocket = () => {
   })
 }
 
+// 自动刷新定时器
+let refreshTimer = null
+
 onMounted(() => {
   loadInterfaces()
   loadSessions()
   setupWebSocket()
+
+  // 每 10 秒自动刷新会话列表（仅当有运行中的会话时）
+  refreshTimer = setInterval(() => {
+    if (isCapturing.value) {
+      loadSessions()
+    }
+  }, 10000)
 })
 
 onUnmounted(() => {
   // 清理 WebSocket 连接
   wsClient.close()
+
+  // 清理定时器
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
 })
 </script>
 

@@ -469,12 +469,52 @@ func (h *CaptureHandler) GetPackets(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
 	offset := (page - 1) * pageSize
 
+	// 获取过滤参数
+	protocol := c.Query("protocol")
+	srcAddr := c.Query("src_addr")
+	dstAddr := c.Query("dst_addr")
+
+	logger.GetLogger().Infof("GetPackets - sessionID: %s, protocol: %s, srcAddr: %s, dstAddr: %s",
+		sessionID, protocol, srcAddr, dstAddr)
+
 	var packets []models.Packet
 	var total int64
 
 	db := database.GetDB()
-	db.Model(&models.Packet{}).Where("session_id = ?", sessionID).Count(&total)
-	db.Where("session_id = ?", sessionID).Offset(offset).Limit(pageSize).Find(&packets)
+
+	// 构建查询条件
+	query := db.Model(&models.Packet{}).Where("session_id = ?", sessionID)
+
+	// 应用过滤条件
+	if protocol != "" {
+		query = query.Where("protocol = ?", protocol)
+	}
+	if srcAddr != "" {
+		query = query.Where("src_addr LIKE ?", "%"+srcAddr+"%")
+	}
+	if dstAddr != "" {
+		query = query.Where("dst_addr LIKE ?", "%"+dstAddr+"%")
+	}
+
+	// 计数
+	query.Count(&total)
+
+	logger.GetLogger().Infof("GetPackets - total count: %d", total)
+
+	// 查询数据（需要重新构建查询，因为 Count 会影响查询）
+	query = db.Model(&models.Packet{}).Where("session_id = ?", sessionID)
+	if protocol != "" {
+		query = query.Where("protocol = ?", protocol)
+	}
+	if srcAddr != "" {
+		query = query.Where("src_addr LIKE ?", "%"+srcAddr+"%")
+	}
+	if dstAddr != "" {
+		query = query.Where("dst_addr LIKE ?", "%"+dstAddr+"%")
+	}
+	query.Order("id DESC").Offset(offset).Limit(pageSize).Find(&packets)
+
+	logger.GetLogger().Infof("GetPackets - returned %d packets", len(packets))
 
 	c.JSON(200, gin.H{
 		"data":      packets,

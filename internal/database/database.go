@@ -47,6 +47,11 @@ func InitDB(cfg *config.DatabaseConfig) error {
 		return fmt.Errorf("failed to auto migrate: %w", err)
 	}
 
+	// 清理遗留的运行中会话（服务器重启后，之前运行的会话应该标记为停止）
+	if err := cleanupRunningSessions(); err != nil {
+		log.Printf("Warning: failed to cleanup running sessions: %v", err)
+	}
+
 	log.Println("Database connected successfully")
 	return nil
 }
@@ -76,4 +81,22 @@ func CloseDB() error {
 		return err
 	}
 	return sqlDB.Close()
+}
+
+// cleanupRunningSessions 清理遗留的运行中会话
+// 服务器重启后，之前状态为 running 的会话应该标记为 stopped
+func cleanupRunningSessions() error {
+	result := DB.Model(&models.CaptureSession{}).
+		Where("status = ?", "running").
+		Update("status", "stopped")
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected > 0 {
+		log.Printf("Cleaned up %d running sessions on startup", result.RowsAffected)
+	}
+
+	return nil
 }
