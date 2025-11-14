@@ -40,7 +40,7 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		RespondBadRequest(c, err.Error())
 		return
 	}
 
@@ -57,14 +57,14 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 
 	// 检查授权
 	if err := h.manager.CheckAuthorization("replay", req.UserID); err != nil {
-		c.JSON(403, gin.H{"error": "Unauthorized"})
+		RespondError(c, 403, "Unauthorized")
 		return
 	}
 
 	// 获取会话信息
 	var session models.CaptureSession
 	if err := database.GetDB().First(&session, req.SessionID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Session not found"})
+		RespondNotFound(c, "Session not found")
 		return
 	}
 
@@ -73,7 +73,7 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 	database.GetDB().Where("session_id = ?", req.SessionID).Find(&packets)
 
 	if len(packets) == 0 {
-		c.JSON(404, gin.H{"error": "No packets found"})
+		RespondNotFound(c, "No packets found")
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 
 	if err := database.GetDB().Create(task).Error; err != nil {
 		logger.GetLogger().Errorf("Failed to create task: %v", err)
-		c.JSON(500, gin.H{"error": "Failed to create task"})
+		RespondInternalError(c, "Failed to create task")
 		return
 	}
 
@@ -165,13 +165,14 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 		h.manager.LogAttack("replay", req.Interface, "packet_replay", req.UserID, nil, "success", "success")
 	}()
 
-	c.JSON(200, gin.H{
+	RespondSuccess(c, gin.H{
 		"message": "Replay started",
-		"data": gin.H{
-			"id":           task.ID,
-			"task_id":      taskID,
-			"status":       "running",
-			"session_name": session.Name,
+		"taskId":  task.ID,
+		"task": gin.H{
+			"id":          task.ID,
+			"taskId":      taskID,
+			"status":      "running",
+			"sessionName": session.Name,
 		},
 	})
 }
@@ -190,7 +191,7 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		RespondBadRequest(c, err.Error())
 		return
 	}
 
@@ -207,7 +208,7 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 
 	// 检查授权
 	if err := h.manager.CheckAuthorization(req.Target, req.UserID); err != nil {
-		c.JSON(403, gin.H{"error": "Unauthorized"})
+		RespondError(c, 403, "Unauthorized")
 		return
 	}
 
@@ -235,7 +236,7 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 
 	if err := database.GetDB().Create(task).Error; err != nil {
 		logger.GetLogger().Errorf("Failed to create task: %v", err)
-		c.JSON(500, gin.H{"error": "Failed to create task"})
+		RespondInternalError(c, "Failed to create task")
 		return
 	}
 
@@ -288,26 +289,30 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 		h.manager.LogAttack("fuzzing", target, "protocol_fuzzing", req.UserID, nil, "success", "success")
 	}()
 
-	c.JSON(200, gin.H{
+	RespondSuccess(c, gin.H{
 		"message": "Fuzzing started",
-		"data": gin.H{
-			"id":      task.ID,
-			"task_id": taskID,
-			"status":  "running",
-			"target":  target,
+		"taskId":  task.ID,
+		"task": gin.H{
+			"id":     task.ID,
+			"taskId": taskID,
+			"status": "running",
+			"target": target,
 		},
 	})
 }
 
-// GetTasks 获取任务列表
+// GetTasks 获取任务列表（支持分页）
 func (h *AttackHandler) GetTasks(c *gin.Context) {
-	var tasks []models.AttackTask
 	db := database.GetDB()
+
+	// 获取分页参数
+	params := GetPaginationParams(c)
 
 	// 查询参数
 	taskType := c.Query("type")
 	status := c.Query("status")
 
+	// 构建查询
 	query := db.Model(&models.AttackTask{})
 	if taskType != "" {
 		query = query.Where("type = ?", taskType)
@@ -316,11 +321,22 @@ func (h *AttackHandler) GetTasks(c *gin.Context) {
 		query = query.Where("status = ?", status)
 	}
 
-	query.Order("id DESC").Find(&tasks)
+	// 查询总数
+	var total int64
+	query.Count(&total)
 
-	c.JSON(200, gin.H{
-		"data": tasks,
-	})
+	// 查询任务列表
+	var tasks []models.AttackTask
+	query.Order("id DESC").
+		Offset(params.GetOffset()).
+		Limit(params.GetLimit()).
+		Find(&tasks)
+
+	// 计算元数据
+	meta := CalculateMeta(total, params.Page, params.PageSize)
+
+	// 返回标准响应
+	RespondSuccessWithMeta(c, gin.H{"tasks": tasks}, meta)
 }
 
 // GetTask 获取任务详情
@@ -329,12 +345,12 @@ func (h *AttackHandler) GetTask(c *gin.Context) {
 
 	var task models.AttackTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Task not found"})
+		RespondNotFound(c, "Task not found")
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"data": task,
+	RespondSuccess(c, gin.H{
+		"task": task,
 	})
 }
 
@@ -344,12 +360,12 @@ func (h *AttackHandler) StopTask(c *gin.Context) {
 
 	var task models.AttackTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Task not found"})
+		RespondNotFound(c, "Task not found")
 		return
 	}
 
 	if task.Status != "running" {
-		c.JSON(400, gin.H{"error": "Task is not running"})
+		RespondBadRequest(c, "Task is not running")
 		return
 	}
 
@@ -361,7 +377,7 @@ func (h *AttackHandler) StopTask(c *gin.Context) {
 	// 更新任务状态
 	updateTaskStatus(task.ID, "stopped", task.Progress, nil)
 
-	c.JSON(200, gin.H{"message": "Task stopped"})
+	RespondSuccess(c, gin.H{"message": "Task stopped"})
 }
 
 // DeleteTask 删除任务
@@ -370,21 +386,21 @@ func (h *AttackHandler) DeleteTask(c *gin.Context) {
 
 	var task models.AttackTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Task not found"})
+		RespondNotFound(c, "Task not found")
 		return
 	}
 
 	if task.Status == "running" {
-		c.JSON(400, gin.H{"error": "Cannot delete running task"})
+		RespondBadRequest(c, "Cannot delete running task")
 		return
 	}
 
 	if err := database.GetDB().Delete(&task).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Failed to delete task"})
+		RespondInternalError(c, "Failed to delete task")
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "Task deleted"})
+	RespondSuccess(c, gin.H{"message": "Task deleted"})
 }
 
 // 辅助函数

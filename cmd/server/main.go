@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"netsecanalyzer/internal/api"
 	"netsecanalyzer/internal/config"
 	"netsecanalyzer/internal/database"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 var (
@@ -63,26 +66,50 @@ func main() {
 	router := api.NewRouter(cfg.Server.Mode)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
+	// 创建 HTTP 服务器以支持优雅关机
+	srv := &http.Server{
+		Addr:           addr,
+		Handler:        router.GetEngine(),
+		ReadTimeout:    30 * time.Second,
+		WriteTimeout:   30 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1 MB
+	}
+
 	logger.GetLogger().Infof("Server starting on %s", addr)
 
-	// 优雅关闭
+	// 在 goroutine 中启动服务器
 	go func() {
-		if err := router.Run(addr); err != nil {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.GetLogger().Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
-	// 等待中断信号
+	// 等待中断信号（SIGINT 或 SIGTERM）
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	sig := <-quit
 
-	logger.GetLogger().Info("Shutting down server...")
+	logger.GetLogger().Infof("Received signal: %v. Shutting down server...", sig)
 
-	// 关闭数据库连接
-	if err := database.CloseDB(); err != nil {
-		logger.GetLogger().Errorf("Error closing database: %v", err)
+	// 创建带超时的 context（30 秒）
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// 优雅关闭服务器（等待现有连接完成）
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.GetLogger().Errorf("Server forced to shutdown: %v", err)
+	} else {
+		logger.GetLogger().Info("Server shutdown gracefully")
 	}
 
-	logger.GetLogger().Info("Server stopped")
+	// 关闭数据库连接
+	logger.GetLogger().Info("Closing database connections...")
+	if err := database.CloseDB(); err != nil {
+		logger.GetLogger().Errorf("Error closing database: %v", err)
+	} else {
+		logger.GetLogger().Info("Database connections closed")
+	}
+
+	logger.GetLogger().Info("Server stopped successfully")
 }

@@ -22,8 +22,8 @@ func (h *StatsHandler) GetOverviewStats(c *gin.Context) {
 	db := database.GetDB()
 
 	var stats struct {
-		ActiveSessions  int64 `json:"active_sessions"`
-		TotalPackets    int64 `json:"total_packets"`
+		ActiveSessions  int64 `json:"activeSessions"`
+		TotalPackets    int64 `json:"totalPackets"`
 		Vulnerabilities int64 `json:"vulnerabilities"`
 		Attacks         int64 `json:"attacks"`
 	}
@@ -37,10 +37,10 @@ func (h *StatsHandler) GetOverviewStats(c *gin.Context) {
 	// 漏洞数量
 	db.Model(&models.Vulnerability{}).Count(&stats.Vulnerabilities)
 
-	// 攻击测试数量
-	db.Model(&models.AttackLog{}).Count(&stats.Attacks)
+	// 攻击测试数量（使用 AttackTask 表）
+	db.Model(&models.AttackTask{}).Count(&stats.Attacks)
 
-	c.JSON(200, stats)
+	RespondSuccess(c, stats)
 }
 
 // GetProtocolDistribution 获取协议分布
@@ -72,7 +72,7 @@ func (h *StatsHandler) GetProtocolDistribution(c *gin.Context) {
 		})
 	}
 
-	c.JSON(200, gin.H{"data": result})
+	RespondSuccess(c, gin.H{"protocols": result})
 }
 
 // GetTrafficTrend 获取流量趋势
@@ -88,10 +88,16 @@ func (h *StatsHandler) GetTrafficTrend(c *gin.Context) {
 	now := time.Now()
 	startTime := now.Add(-24 * time.Hour)
 
+	// 根据数据库类型选择不同的时间函数
+	hourExpr := "HOUR(created_at)"
+	if db.Dialector.Name() == "sqlite" {
+		hourExpr = "strftime('%H', created_at)"
+	}
+
 	db.Model(&models.Packet{}).
-		Select("HOUR(timestamp) as hour, COUNT(*) as count").
-		Where("timestamp >= ?", startTime).
-		Group("HOUR(timestamp)").
+		Select(hourExpr+" as hour, COUNT(*) as count").
+		Where("created_at >= ?", startTime).
+		Group(hourExpr).
 		Order("hour").
 		Find(&trendData)
 
@@ -109,7 +115,7 @@ func (h *StatsHandler) GetTrafficTrend(c *gin.Context) {
 		counts = append(counts, hourMap[hour])
 	}
 
-	c.JSON(200, gin.H{
+	RespondSuccess(c, gin.H{
 		"times":  times,
 		"counts": counts,
 	})
@@ -123,7 +129,7 @@ func (h *StatsHandler) GetSessionProtocolStats(c *gin.Context) {
 	var protocolStats []models.ProtocolStat
 	db.Where("session_id = ?", sessionID).Find(&protocolStats)
 
-	c.JSON(200, gin.H{"data": protocolStats})
+	RespondSuccess(c, gin.H{"protocolStats": protocolStats})
 }
 
 // GetRecentSessions 获取最近的会话
@@ -134,7 +140,7 @@ func (h *StatsHandler) GetRecentSessions(c *gin.Context) {
 	var sessions []models.CaptureSession
 	db.Order("created_at DESC").Limit(parseInt(limit, 10)).Find(&sessions)
 
-	c.JSON(200, gin.H{"data": sessions})
+	RespondSuccess(c, gin.H{"sessions": sessions})
 }
 
 // GetRecentVulnerabilities 获取最近发现的漏洞
@@ -145,7 +151,7 @@ func (h *StatsHandler) GetRecentVulnerabilities(c *gin.Context) {
 	var vulns []models.Vulnerability
 	db.Order("discovered_at DESC").Limit(parseInt(limit, 10)).Find(&vulns)
 
-	c.JSON(200, gin.H{"data": vulns})
+	RespondSuccess(c, gin.H{"vulnerabilities": vulns})
 }
 
 // formatHour 格式化小时

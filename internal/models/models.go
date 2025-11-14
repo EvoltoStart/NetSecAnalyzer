@@ -12,45 +12,45 @@ type CaptureSession struct {
 	Name        string     `gorm:"size:255;not null" json:"name"`
 	Type        string     `gorm:"size:50;not null;index" json:"type"`   // ip, can, rs485
 	Status      string     `gorm:"size:50;not null;index" json:"status"` // running, stopped, completed
-	PacketCount int64      `json:"packet_count"`
-	StartTime   *time.Time `json:"start_time,omitempty"`
-	EndTime     *time.Time `json:"end_time,omitempty"`
-	Config      JSON       `gorm:"type:json" json:"config"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	PacketCount int64      `json:"packetCount"`
+	StartTime   *time.Time `json:"startTime,omitempty"`
+	EndTime     *time.Time `json:"endTime,omitempty"`
+	Config      JSON       `gorm:"type:text" json:"config"` // SQLite 兼容: json → text
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 // Packet 数据包
 type Packet struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
-	SessionID      uint      `gorm:"index;not null" json:"session_id"`
+	SessionID      uint      `gorm:"index;not null" json:"sessionId"`
 	Timestamp      time.Time `gorm:"index" json:"timestamp"`
 	Protocol       string    `gorm:"size:50;index" json:"protocol"`
-	SrcAddr        string    `gorm:"size:100;index" json:"src_addr"`
-	DstAddr        string    `gorm:"size:100;index" json:"dst_addr"`
-	SrcPort        int       `json:"src_port,omitempty"`
-	DstPort        int       `json:"dst_port,omitempty"`
+	SrcAddr        string    `gorm:"size:100;index" json:"srcAddr"`
+	DstAddr        string    `gorm:"size:100;index" json:"dstAddr"`
+	SrcPort        int       `json:"srcPort,omitempty"`
+	DstPort        int       `json:"dstPort,omitempty"`
 	Length         int       `json:"length"`
 	Payload        []byte    `gorm:"type:blob" json:"payload,omitempty"`
-	PayloadPath    string    `gorm:"size:500" json:"payload_path,omitempty"`      // Payload 文件路径
-	PayloadHash    string    `gorm:"size:64;index" json:"payload_hash,omitempty"` // Payload SHA256 哈希
-	AnalysisResult JSON      `gorm:"type:json" json:"analysis_result,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	PayloadPath    string    `gorm:"size:500" json:"payloadPath,omitempty"`      // Payload 文件路径
+	PayloadHash    string    `gorm:"size:64;index" json:"payloadHash,omitempty"` // Payload SHA256 哈希
+	AnalysisResult JSON      `gorm:"type:text" json:"analysisResult,omitempty"`  // SQLite 兼容: json → text
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 // Vulnerability 漏洞信息
 type Vulnerability struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
 	Target       string    `gorm:"size:255;not null;index" json:"target"`
-	VulnType     string    `gorm:"size:100;not null" json:"vuln_type"`
+	VulnType     string    `gorm:"size:100;not null" json:"vulnType"`
 	Severity     string    `gorm:"size:50;not null;index" json:"severity"` // critical, high, medium, low, info
-	CVEID        string    `gorm:"size:50;index" json:"cve_id,omitempty"`
+	CVEID        string    `gorm:"size:50;index" json:"cveId,omitempty"`
 	Title        string    `gorm:"size:500" json:"title"`
 	Description  string    `gorm:"type:text" json:"description"`
 	Solution     string    `gorm:"type:text" json:"solution,omitempty"`
-	References   JSON      `gorm:"type:json" json:"references,omitempty"`
-	DiscoveredAt time.Time `json:"discovered_at"`
-	CreatedAt    time.Time `json:"created_at"`
+	References   JSON      `gorm:"type:text" json:"references,omitempty"` // SQLite 兼容: json → text
+	DiscoveredAt time.Time `json:"discoveredAt"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 // ScanTask 扫描任务
@@ -58,99 +58,99 @@ type ScanTask struct {
 	ID          uint       `gorm:"primaryKey" json:"id"`
 	Name        string     `gorm:"size:255;not null" json:"name"`
 	Target      string     `gorm:"size:500;not null" json:"target"`
-	ScanType    string     `gorm:"size:50;not null" json:"scan_type"`      // port, vuln, service, can, rs485
-	NetworkType string     `gorm:"size:50;default:ip" json:"network_type"` // ip, can, rs485
-	Status      string     `gorm:"size:50;not null;index" json:"status"`   // pending, running, completed, failed
-	Progress    int        `json:"progress"`                               // 0-100
-	Result      JSON       `gorm:"type:json" json:"result,omitempty"`
+	ScanType    string     `gorm:"size:50;not null" json:"scanType"`      // port, vuln, service, can, rs485
+	NetworkType string     `gorm:"size:50;default:ip" json:"networkType"` // ip, can, rs485
+	Status      string     `gorm:"size:50;not null;index" json:"status"`  // pending, running, completed, failed
+	Progress    int        `json:"progress"`                              // 0-100
+	Result      JSON       `gorm:"type:text" json:"result,omitempty"`     // SQLite 兼容: json → text
 	Error       string     `gorm:"type:text" json:"error,omitempty"`
-	StartTime   *time.Time `json:"start_time,omitempty"`
-	EndTime     *time.Time `json:"end_time,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	StartTime   *time.Time `json:"startTime,omitempty"`
+	EndTime     *time.Time `json:"endTime,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 // AttackLog 攻击操作日志
 type AttackLog struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
-	AttackType string    `gorm:"size:100;not null;index" json:"attack_type"`
+	AttackType string    `gorm:"size:100;not null;index" json:"attackType"`
 	Target     string    `gorm:"size:500;not null" json:"target"`
 	Method     string    `gorm:"size:100" json:"method"`
-	Parameters JSON      `gorm:"type:json" json:"parameters,omitempty"`
+	Parameters JSON      `gorm:"type:text" json:"parameters,omitempty"` // SQLite 兼容: json → text
 	Result     string    `gorm:"type:text" json:"result,omitempty"`
 	Status     string    `gorm:"size:50;not null" json:"status"` // success, failed
-	UserID     string    `gorm:"size:100;index" json:"user_id"`
+	UserID     string    `gorm:"size:100;index" json:"userId"`
 	Authorized bool      `gorm:"not null" json:"authorized"`
-	ExecutedAt time.Time `gorm:"index" json:"executed_at"`
-	CreatedAt  time.Time `json:"created_at"`
+	ExecutedAt time.Time `gorm:"index" json:"executedAt"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 // AttackTask 攻击任务
 type AttackTask struct {
 	ID          uint       `gorm:"primaryKey" json:"id"`
-	TaskID      string     `gorm:"size:100;uniqueIndex;not null" json:"task_id"`
-	Type        string     `gorm:"size:50;not null;index" json:"type"`   // replay, fuzzing
-	Target      string     `gorm:"size:500;not null" json:"target"`      // 目标地址或接口
-	Status      string     `gorm:"size:50;not null;index" json:"status"` // running, completed, failed, stopped
-	Progress    int        `json:"progress"`                             // 0-100
-	Parameters  JSON       `gorm:"type:json" json:"parameters,omitempty"`
-	Result      JSON       `gorm:"type:json" json:"result,omitempty"`
-	UserID      string     `gorm:"size:100;index" json:"user_id"`
-	CreatedAt   time.Time  `json:"created_at"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	TaskID      string     `gorm:"size:100;uniqueIndex;not null" json:"taskId"`
+	Type        string     `gorm:"size:50;not null;index" json:"type"`    // replay, fuzzing
+	Target      string     `gorm:"size:500;not null" json:"target"`       // 目标地址或接口
+	Status      string     `gorm:"size:50;not null;index" json:"status"`  // running, completed, failed, stopped
+	Progress    int        `json:"progress"`                              // 0-100
+	Parameters  JSON       `gorm:"type:text" json:"parameters,omitempty"` // SQLite 兼容: json → text
+	Result      JSON       `gorm:"type:text" json:"result,omitempty"`     // SQLite 兼容: json → text
+	UserID      string     `gorm:"size:100;index" json:"userId"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
 }
 
 // DefenseTask 防御任务
 type DefenseTask struct {
 	ID             uint       `gorm:"primaryKey" json:"id"`
-	TaskID         string     `gorm:"size:100;uniqueIndex;not null" json:"task_id"`
-	Type           string     `gorm:"size:50;not null;index" json:"type"`   // ids, firewall, filter
-	Interface      string     `gorm:"size:100" json:"interface"`            // 监听接口
-	Status         string     `gorm:"size:50;not null;index" json:"status"` // running, stopped
-	Parameters     JSON       `gorm:"type:json" json:"parameters,omitempty"`
-	EventsDetected int        `json:"events_detected"`                          // 检测到的事件数
-	AlertsCount    int        `json:"alerts_count"`                             // 告警数
-	BlocksCount    int        `json:"blocks_count"`                             // 阻断数
-	RecentAlerts   JSON       `gorm:"type:json" json:"recent_alerts,omitempty"` // 最近的告警
-	UserID         string     `gorm:"size:100;index" json:"user_id"`
-	CreatedAt      time.Time  `json:"created_at"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	TaskID         string     `gorm:"size:100;uniqueIndex;not null" json:"taskId"`
+	Type           string     `gorm:"size:50;not null;index" json:"type"`      // ids, firewall, filter
+	Interface      string     `gorm:"size:100" json:"interface"`               // 监听接口
+	Status         string     `gorm:"size:50;not null;index" json:"status"`    // running, stopped
+	Parameters     JSON       `gorm:"type:text" json:"parameters,omitempty"`   // SQLite 兼容: json → text
+	EventsDetected int        `json:"eventsDetected"`                          // 检测到的事件数
+	AlertsCount    int        `json:"alertsCount"`                             // 告警数
+	BlocksCount    int        `json:"blocksCount"`                             // 阻断数
+	RecentAlerts   JSON       `gorm:"type:text" json:"recentAlerts,omitempty"` // SQLite 兼容: json → text
+	UserID         string     `gorm:"size:100;index" json:"userId"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	CompletedAt    *time.Time `json:"completedAt,omitempty"`
 }
 
 // ProtocolStat 协议统计
 type ProtocolStat struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	SessionID   uint      `gorm:"index;not null" json:"session_id"`
+	SessionID   uint      `gorm:"index;not null" json:"sessionId"`
 	Protocol    string    `gorm:"size:50;not null;index" json:"protocol"`
-	PacketCount int64     `json:"packet_count"`
-	ByteCount   int64     `json:"byte_count"`
-	FirstSeen   time.Time `json:"first_seen"`
-	LastSeen    time.Time `json:"last_seen"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	PacketCount int64     `json:"packetCount"`
+	ByteCount   int64     `json:"byteCount"`
+	FirstSeen   time.Time `json:"firstSeen"`
+	LastSeen    time.Time `json:"lastSeen"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // ScanResult 扫描结果
 type ScanResult struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	TaskID      uint      `gorm:"not null;index" json:"task_id"`
-	ResultType  string    `gorm:"size:50;not null;index" json:"result_type"` // port, service, vulnerability, can_id, modbus_device, topology
-	Target      string    `gorm:"size:500" json:"target,omitempty"`          // 目标（IP/接口/端口）
+	TaskID      uint      `gorm:"not null;index" json:"taskId"`
+	ResultType  string    `gorm:"size:50;not null;index" json:"resultType"` // port, service, vulnerability, can_id, modbus_device, topology
+	Target      string    `gorm:"size:500" json:"target,omitempty"`         // 目标（IP/接口/端口）
 	Port        int       `json:"port,omitempty"`
 	Protocol    string    `gorm:"size:20" json:"protocol,omitempty"`
 	State       string    `gorm:"size:20" json:"state,omitempty"`
 	Service     string    `gorm:"size:100" json:"service,omitempty"`
 	Version     string    `gorm:"size:255" json:"version,omitempty"`
 	Banner      string    `gorm:"type:text" json:"banner,omitempty"`
-	VulnType    string    `gorm:"size:100" json:"vuln_type,omitempty"`
+	VulnType    string    `gorm:"size:100" json:"vulnType,omitempty"`
 	Severity    string    `gorm:"size:20;index" json:"severity,omitempty"`
 	Title       string    `gorm:"size:255" json:"title,omitempty"`
 	Description string    `gorm:"type:text" json:"description,omitempty"`
 	Solution    string    `gorm:"type:text" json:"solution,omitempty"`
 	CVE         string    `gorm:"size:50" json:"cve,omitempty"`
 	CVSS        float64   `json:"cvss,omitempty"`
-	Details     JSON      `gorm:"type:json" json:"details,omitempty"` // 详细信息（CAN/Modbus 特定数据）
-	ExtraData   JSON      `gorm:"type:json" json:"extra_data,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	Details     JSON      `gorm:"type:text" json:"details,omitempty"`   // SQLite 兼容: json → text
+	ExtraData   JSON      `gorm:"type:text" json:"extraData,omitempty"` // SQLite 兼容: json → text
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 // JSON 自定义 JSON 类型

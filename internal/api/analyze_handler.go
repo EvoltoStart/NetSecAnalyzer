@@ -24,23 +24,23 @@ func NewAnalyzeHandler(a *analyzer.Analyzer) *AnalyzeHandler {
 func (h *AnalyzeHandler) ParsePacket(c *gin.Context) {
 	var pkt models.Packet
 	if err := c.ShouldBindJSON(&pkt); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		RespondBadRequest(c, err.Error())
 		return
 	}
 
 	info, err := h.analyzer.Analyze(&pkt)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		RespondInternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(200, info)
+	RespondSuccess(c, info)
 }
 
 // GetProtocols 获取支持的协议
 func (h *AnalyzeHandler) GetProtocols(c *gin.Context) {
 	protocols := h.analyzer.GetSupportedProtocols()
-	c.JSON(200, gin.H{"protocols": protocols})
+	RespondSuccess(c, gin.H{"protocols": protocols})
 }
 
 // GetStatistics 获取统计信息
@@ -50,7 +50,7 @@ func (h *AnalyzeHandler) GetStatistics(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		RespondBadRequest(c, err.Error())
 		return
 	}
 
@@ -64,7 +64,7 @@ func (h *AnalyzeHandler) GetStatistics(c *gin.Context) {
 	}
 
 	stats := analyzer.GenerateStatistics(packetPtrs)
-	c.JSON(200, stats)
+	RespondSuccess(c, stats)
 }
 
 // GetPacketAnalysis 获取单个数据包的分析结果
@@ -73,15 +73,15 @@ func (h *AnalyzeHandler) GetPacketAnalysis(c *gin.Context) {
 
 	var packet models.Packet
 	if err := database.GetDB().First(&packet, id).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Packet not found"})
+		RespondNotFound(c, "Packet not found")
 		return
 	}
 
 	// 如果已有分析结果，直接返回
 	if packet.AnalysisResult != nil && len(packet.AnalysisResult) > 0 {
-		c.JSON(200, gin.H{
-			"packet_id": packet.ID,
-			"analysis":  packet.AnalysisResult,
+		RespondSuccess(c, gin.H{
+			"packetId": packet.ID,
+			"analysis": packet.AnalysisResult,
 		})
 		return
 	}
@@ -89,7 +89,7 @@ func (h *AnalyzeHandler) GetPacketAnalysis(c *gin.Context) {
 	// 如果没有分析结果，执行分析
 	info, err := h.analyzer.Analyze(&packet)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		RespondInternalError(c, err.Error())
 		return
 	}
 
@@ -111,9 +111,9 @@ func (h *AnalyzeHandler) GetPacketAnalysis(c *gin.Context) {
 
 	database.GetDB().Save(&packet)
 
-	c.JSON(200, gin.H{
-		"packet_id": packet.ID,
-		"analysis":  packet.AnalysisResult,
+	RespondSuccess(c, gin.H{
+		"packetId": packet.ID,
+		"analysis": packet.AnalysisResult,
 	})
 }
 
@@ -160,12 +160,12 @@ func (h *AnalyzeHandler) GetSessionAnalysis(c *gin.Context) {
 		}
 	}
 
-	c.JSON(200, gin.H{
-		"session_id": sessionID,
-		"total":      total,
-		"page":       pageInt,
-		"page_size":  pageSizeInt,
-		"results":    results,
+	RespondSuccess(c, gin.H{
+		"sessionId": sessionID,
+		"total":     total,
+		"page":      pageInt,
+		"pageSize":  pageSizeInt,
+		"results":   results,
 	})
 }
 
@@ -192,10 +192,10 @@ func (h *AnalyzeHandler) GetSessionAnomalies(c *gin.Context) {
 		}
 	}
 
-	c.JSON(200, gin.H{
-		"session_id": sessionID,
-		"count":      len(anomalies),
-		"anomalies":  anomalies,
+	RespondSuccess(c, gin.H{
+		"sessionId": sessionID,
+		"count":     len(anomalies),
+		"anomalies": anomalies,
 	})
 }
 
@@ -207,7 +207,7 @@ func (h *AnalyzeHandler) ReanalyzeSession(c *gin.Context) {
 	database.GetDB().Where("session_id = ?", sessionID).Find(&packets)
 
 	if len(packets) == 0 {
-		c.JSON(404, gin.H{"error": "No packets found for this session"})
+		RespondNotFound(c, "No packets found for this session")
 		return
 	}
 
@@ -241,9 +241,9 @@ func (h *AnalyzeHandler) ReanalyzeSession(c *gin.Context) {
 		}
 	}
 
-	c.JSON(200, gin.H{
-		"session_id":     sessionID,
-		"analyzed_count": len(packets),
-		"message":        "Reanalysis completed",
+	RespondSuccess(c, gin.H{
+		"sessionId":     sessionID,
+		"analyzedCount": len(packets),
+		"message":       "Reanalysis completed",
 	})
 }

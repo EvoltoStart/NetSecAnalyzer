@@ -34,7 +34,49 @@ type StartIDSRequest struct {
 func (h *DefenseHandler) StartIDS(c *gin.Context) {
 	var req StartIDSRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		RespondBadRequest(c, err.Error())
+		return
+	}
+
+	// 验证输入参数
+	// 验证敏感度范围（1-10）
+	if req.Sensitivity < 1 || req.Sensitivity > 10 {
+		RespondBadRequest(c, "Sensitivity must be between 1 and 10")
+		return
+	}
+
+	// 验证告警阈值（必须大于0）
+	if req.AlertThreshold < 1 {
+		RespondBadRequest(c, "Alert threshold must be greater than 0")
+		return
+	}
+
+	// 验证规则数组（不得为空）
+	if len(req.Rules) == 0 {
+		RespondBadRequest(c, "At least one detection rule must be selected")
+		return
+	}
+
+	// 验证规则名称（白名单）
+	validRules := map[string]bool{
+		"port_scan":     true,
+		"dos":           true,
+		"brute_force":   true,
+		"sql_injection": true,
+		"xss":           true,
+		"malware":       true,
+	}
+
+	for _, rule := range req.Rules {
+		if !validRules[rule] {
+			RespondBadRequest(c, fmt.Sprintf("Invalid rule: %s. Supported rules: port_scan, dos, brute_force, sql_injection, xss, malware", rule))
+			return
+		}
+	}
+
+	// 验证接口名称（复用 capture_handler 的验证函数）
+	if !isValidInterface(req.Interface) {
+		RespondBadRequest(c, "Invalid interface name. Please use a valid network interface (e.g., eth0, wlan0, any)")
 		return
 	}
 
@@ -60,18 +102,19 @@ func (h *DefenseHandler) StartIDS(c *gin.Context) {
 	}
 
 	if err := database.GetDB().Create(task).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Failed to create task"})
+		RespondInternalError(c, "Failed to create task")
 		return
 	}
 
-	logger.GetLogger().Infof("IDS task started: %s on interface %s", taskID, req.Interface)
+	logger.GetLogger().Infof("IDS task started: %s on interface %s with rules: %v", taskID, req.Interface, req.Rules)
 
 	// 异步执行 IDS
 	go h.runIDS(context.Background(), task, req)
 
-	c.JSON(200, gin.H{
+	RespondSuccess(c, gin.H{
 		"message": "IDS started",
-		"data":    task,
+		"taskId":  task.ID,
+		"task":    task,
 	})
 }
 
@@ -147,7 +190,7 @@ func (h *DefenseHandler) StopIDS(c *gin.Context) {
 
 	var task models.DefenseTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Task not found"})
+		RespondNotFound(c, "Task not found")
 		return
 	}
 
@@ -157,15 +200,32 @@ func (h *DefenseHandler) StopIDS(c *gin.Context) {
 
 	logger.GetLogger().Infof("IDS task stopped: %s", task.TaskID)
 
-	c.JSON(200, gin.H{"message": "IDS stopped"})
+	RespondSuccess(c, gin.H{"message": "IDS stopped"})
 }
 
-// GetIDSTasks 获取 IDS 任务列表
+// GetIDSTasks 获取 IDS 任务列表（支持分页）
 func (h *DefenseHandler) GetIDSTasks(c *gin.Context) {
-	var tasks []models.DefenseTask
-	database.GetDB().Where("type = ?", "ids").Order("created_at DESC").Find(&tasks)
+	// 获取分页参数
+	params := GetPaginationParams(c)
 
-	c.JSON(200, gin.H{"data": tasks})
+	// 查询总数
+	var total int64
+	database.GetDB().Model(&models.DefenseTask{}).Where("type = ?", "ids").Count(&total)
+
+	// 查询任务列表
+	var tasks []models.DefenseTask
+	database.GetDB().
+		Where("type = ?", "ids").
+		Order("created_at DESC").
+		Offset(params.GetOffset()).
+		Limit(params.GetLimit()).
+		Find(&tasks)
+
+	// 计算元数据
+	meta := CalculateMeta(total, params.Page, params.PageSize)
+
+	// 返回标准响应
+	RespondSuccessWithMeta(c, gin.H{"tasks": tasks}, meta)
 }
 
 func timePtr(t time.Time) *time.Time {

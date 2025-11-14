@@ -3,8 +3,11 @@ package api
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +28,145 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
+}
+
+// 验证辅助函数
+
+// isValidInterface 验证网络接口名称
+func isValidInterface(iface string) bool {
+	if iface == "" {
+		return false
+	}
+
+	// 检查接口名称格式（字母数字和连字符，长度限制）
+	if len(iface) > 50 {
+		return false
+	}
+
+	// 允许的接口名称模式：eth0, wlan0, can0, any, lo, enp0s3 等
+	validPattern := regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`)
+	if !validPattern.MatchString(iface) {
+		return false
+	}
+
+	// 可选：检查接口是否真实存在（对于 IP 捕获）
+	// 注意：对于 "any" 这样的特殊接口，不需要检查
+	if iface == "any" || iface == "lo" {
+		return true
+	}
+
+	// 尝试获取接口列表验证
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		// 如果无法获取接口列表，只进行格式验证
+		logger.GetLogger().Warnf("Cannot get network interfaces: %v", err)
+		return true
+	}
+
+	for _, i := range interfaces {
+		if i.Name == iface {
+			return true
+		}
+	}
+
+	// 对于 CAN 和 RS485，接口可能不在标准列表中
+	// 允许 can0-can9, ttyUSB0-ttyUSB9 等
+	if strings.HasPrefix(iface, "can") || strings.HasPrefix(iface, "tty") {
+		return true
+	}
+
+	return false
+}
+
+// isValidBPFFilter 验证 BPF 过滤器语法
+func isValidBPFFilter(filter string) bool {
+	if filter == "" {
+		return true // 空过滤器是有效的
+	}
+
+	// 长度限制
+	if len(filter) > 1000 {
+		return false
+	}
+
+	// 基本的 BPF 语法检查
+	// 允许的关键字和模式
+	validKeywords := []string{
+		"tcp", "udp", "icmp", "ip", "ip6", "arp", "rarp",
+		"host", "net", "port", "src", "dst",
+		"and", "or", "not",
+		"portrange", "less", "greater",
+	}
+
+	// 转换为小写进行检查
+	lowerFilter := strings.ToLower(filter)
+
+	// 检查是否包含危险字符（防止命令注入）
+	dangerousChars := []string{";", "|", "&", "`", "$", "()", "{}"}
+	for _, char := range dangerousChars {
+		if strings.Contains(filter, char) {
+			return false
+		}
+	}
+
+	// 检查是否至少包含一个有效关键字
+	hasValidKeyword := false
+	for _, keyword := range validKeywords {
+		if strings.Contains(lowerFilter, keyword) {
+			hasValidKeyword = true
+			break
+		}
+	}
+
+	// 如果包含数字（端口号或IP地址），也认为是有效的
+	if regexp.MustCompile(`\d+`).MatchString(filter) {
+		hasValidKeyword = true
+	}
+
+	return hasValidKeyword
+}
+
+// isValidProtocol 验证协议名称
+func isValidProtocol(protocol string) bool {
+	if protocol == "" {
+		return false
+	}
+
+	// 支持的协议白名单
+	validProtocols := map[string]bool{
+		"TCP":     true,
+		"UDP":     true,
+		"ICMP":    true,
+		"HTTP":    true,
+		"HTTPS":   true,
+		"DNS":     true,
+		"ARP":     true,
+		"TLS":     true,
+		"SSH":     true,
+		"FTP":     true,
+		"SMTP":    true,
+		"POP3":    true,
+		"IMAP":    true,
+		"DHCP":    true,
+		"NTP":     true,
+		"SNMP":    true,
+		"Modbus":  true,
+		"CAN":     true,
+		"Unknown": true,
+	}
+
+	return validProtocols[protocol]
+}
+
+// isValidIPAddress 验证 IP 地址格式
+func isValidIPAddress(addr string) bool {
+	if addr == "" {
+		return false
+	}
+
+	// 解析 IP 地址
+	ip := net.ParseIP(addr)
+	return ip != nil
 }
 
 // CaptureHandler 数据采集处理器
@@ -76,8 +218,54 @@ type StartCaptureRequest struct {
 func (h *CaptureHandler) StartCapture(c *gin.Context) {
 	var req StartCaptureRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		RespondBadRequest(c, err.Error())
 		return
+	}
+
+	// 验证输入参数
+	// 验证接口名称（对于 IP 和 CAN 捕获）
+	if req.Type == "ip" || req.Type == "can" {
+		iface := ""
+		if val, ok := req.Config["interface"].(string); ok {
+			iface = val
+		}
+
+		if iface == "" {
+			RespondBadRequest(c, "Interface name is required")
+			return
+		}
+
+		if !isValidInterface(iface) {
+			RespondBadRequest(c, "Invalid interface name. Please use a valid network interface (e.g., eth0, wlan0, any)")
+			return
+		}
+	}
+
+	// 验证串口名称（对于 RS485 捕获）
+	if req.Type == "rs485" {
+		port := ""
+		if val, ok := req.Config["port"].(string); ok {
+			port = val
+		}
+
+		if port == "" {
+			RespondBadRequest(c, "Serial port is required for RS485 capture")
+			return
+		}
+
+		// 验证串口名称格式
+		if !strings.HasPrefix(port, "/dev/tty") && !strings.HasPrefix(port, "COM") {
+			RespondBadRequest(c, "Invalid serial port name. Must start with /dev/tty or COM")
+			return
+		}
+	}
+
+	// 验证 BPF 过滤器（仅对 IP 捕获）
+	if req.Type == "ip" && req.Filter != "" {
+		if !isValidBPFFilter(req.Filter) {
+			RespondBadRequest(c, "Invalid BPF filter syntax. Please use valid BPF expressions (e.g., 'tcp port 80', 'host 192.168.1.1')")
+			return
+		}
 	}
 
 	// 创建会话记录
@@ -91,7 +279,7 @@ func (h *CaptureHandler) StartCapture(c *gin.Context) {
 	}
 
 	if err := database.GetDB().Create(session).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Failed to create session"})
+		RespondInternalError(c, "Failed to create session")
 		return
 	}
 
@@ -110,13 +298,13 @@ func (h *CaptureHandler) StartCapture(c *gin.Context) {
 		go h.startRS485Capture(ctx, session, req)
 	default:
 		cancel()
-		c.JSON(400, gin.H{"error": "Invalid capture type"})
+		RespondBadRequest(c, "Invalid capture type")
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"message":    "Capture started",
-		"session_id": session.ID,
+	RespondSuccess(c, gin.H{
+		"message":   "Capture started",
+		"sessionId": session.ID,
 	})
 }
 
@@ -402,7 +590,7 @@ func (h *CaptureHandler) StopCapture(c *gin.Context) {
 	sessionID := c.Query("session_id")
 	id, err := strconv.ParseUint(sessionID, 10, 32)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid session ID"})
+		RespondBadRequest(c, "Invalid session ID")
 		return
 	}
 
@@ -415,37 +603,34 @@ func (h *CaptureHandler) StopCapture(c *gin.Context) {
 	h.mu.Unlock()
 
 	if !exists {
-		c.JSON(404, gin.H{"error": "Session not found"})
+		RespondNotFound(c, "Session not found")
 		return
 	}
 
 	// 更新数据库状态
 	database.GetDB().Model(&models.CaptureSession{}).Where("id = ?", id).Update("status", "stopped")
 
-	c.JSON(200, gin.H{"message": "Capture stopped"})
+	RespondSuccess(c, gin.H{"message": "Capture stopped"})
 }
 
-// ListSessions 列出会话
+// ListSessions 列出会话（支持分页）
 func (h *CaptureHandler) ListSessions(c *gin.Context) {
 	var sessions []models.CaptureSession
 	db := database.GetDB()
 
-	// 分页参数
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	offset := (page - 1) * pageSize
+	// 获取分页参数
+	params := GetPaginationParams(c)
 
 	// 查询
 	var total int64
 	db.Model(&models.CaptureSession{}).Count(&total)
-	db.Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&sessions)
+	db.Offset(params.GetOffset()).Limit(params.GetLimit()).Order("created_at DESC").Find(&sessions)
 
-	c.JSON(200, gin.H{
-		"data":      sessions,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
-	})
+	// 计算元数据
+	meta := CalculateMeta(total, params.Page, params.PageSize)
+
+	// 返回标准响应
+	RespondSuccessWithMeta(c, gin.H{"sessions": sessions}, meta)
 }
 
 // GetSession 获取会话详情
@@ -454,25 +639,91 @@ func (h *CaptureHandler) GetSession(c *gin.Context) {
 	var session models.CaptureSession
 
 	if err := database.GetDB().First(&session, id).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Session not found"})
+		RespondNotFound(c, "Session not found")
 		return
 	}
 
-	c.JSON(200, session)
+	RespondSuccess(c, gin.H{"session": session})
 }
 
-// GetPackets 获取数据包
+// GetPackets 获取数据包（支持分页和过滤）
 func (h *CaptureHandler) GetPackets(c *gin.Context) {
 	sessionID := c.Param("id")
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	offset := (page - 1) * pageSize
+	// 获取分页参数
+	params := GetPaginationParams(c)
 
 	// 获取过滤参数
 	protocol := c.Query("protocol")
 	srcAddr := c.Query("src_addr")
 	dstAddr := c.Query("dst_addr")
+
+	// 验证输入参数
+	// 验证协议参数
+	if protocol != "" && !isValidProtocol(protocol) {
+		RespondBadRequest(c, "Invalid protocol. Supported protocols: TCP, UDP, HTTP, DNS, ICMP, ARP, TLS, SSH, etc.")
+		return
+	}
+
+	// 验证源地址
+	if srcAddr != "" {
+		// 允许部分 IP 地址用于搜索，但检查基本格式
+		// 如果包含点号，验证是否为有效的 IP 地址或 IP 前缀
+		if strings.Contains(srcAddr, ".") {
+			// 尝试解析为完整 IP
+			if net.ParseIP(srcAddr) == nil {
+				// 如果不是完整 IP，检查是否为有效的 IP 前缀（如 "192.168"）
+				parts := strings.Split(srcAddr, ".")
+				if len(parts) > 4 {
+					RespondBadRequest(c, "Invalid source IP address format")
+					return
+				}
+				// 验证每个部分是否为有效数字
+				for _, part := range parts {
+					if part != "" {
+						num, err := strconv.Atoi(part)
+						if err != nil || num < 0 || num > 255 {
+							RespondBadRequest(c, "Invalid source IP address format")
+							return
+						}
+					}
+				}
+			}
+		}
+
+		// 防止 SQL 注入：检查是否包含危险字符
+		if strings.ContainsAny(srcAddr, "';\"\\") {
+			RespondBadRequest(c, "Invalid characters in source address")
+			return
+		}
+	}
+
+	// 验证目标地址（同源地址）
+	if dstAddr != "" {
+		if strings.Contains(dstAddr, ".") {
+			if net.ParseIP(dstAddr) == nil {
+				parts := strings.Split(dstAddr, ".")
+				if len(parts) > 4 {
+					RespondBadRequest(c, "Invalid destination IP address format")
+					return
+				}
+				for _, part := range parts {
+					if part != "" {
+						num, err := strconv.Atoi(part)
+						if err != nil || num < 0 || num > 255 {
+							RespondBadRequest(c, "Invalid destination IP address format")
+							return
+						}
+					}
+				}
+			}
+		}
+
+		if strings.ContainsAny(dstAddr, "';\"\\") {
+			RespondBadRequest(c, "Invalid characters in destination address")
+			return
+		}
+	}
 
 	logger.GetLogger().Infof("GetPackets - sessionID: %s, protocol: %s, srcAddr: %s, dstAddr: %s",
 		sessionID, protocol, srcAddr, dstAddr)
@@ -485,7 +736,7 @@ func (h *CaptureHandler) GetPackets(c *gin.Context) {
 	// 构建查询条件
 	query := db.Model(&models.Packet{}).Where("session_id = ?", sessionID)
 
-	// 应用过滤条件
+	// 应用过滤条件（已验证的参数）
 	if protocol != "" {
 		query = query.Where("protocol = ?", protocol)
 	}
@@ -512,52 +763,51 @@ func (h *CaptureHandler) GetPackets(c *gin.Context) {
 	if dstAddr != "" {
 		query = query.Where("dst_addr LIKE ?", "%"+dstAddr+"%")
 	}
-	query.Order("id DESC").Offset(offset).Limit(pageSize).Find(&packets)
+	query.Order("id DESC").Offset(params.GetOffset()).Limit(params.GetLimit()).Find(&packets)
 
 	logger.GetLogger().Infof("GetPackets - returned %d packets", len(packets))
 
-	c.JSON(200, gin.H{
-		"data":      packets,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
-	})
+	// 计算元数据
+	meta := CalculateMeta(total, params.Page, params.PageSize)
+
+	// 返回标准响应
+	RespondSuccessWithMeta(c, gin.H{"packets": packets}, meta)
 }
 
 // GetInterfaces 获取可用网络接口
 func (h *CaptureHandler) GetInterfaces(c *gin.Context) {
 	interfaces, err := capture.GetAvailableInterfaces()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		RespondInternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(200, gin.H{"interfaces": interfaces})
+	RespondSuccess(c, gin.H{"interfaces": interfaces})
 }
 
 // GetSerialPorts 获取可用串口列表
 func (h *CaptureHandler) GetSerialPorts(c *gin.Context) {
 	ports, err := capture.GetAvailableSerialPorts()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		RespondInternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(200, gin.H{"ports": ports})
+	RespondSuccess(c, gin.H{"ports": ports})
 }
 
 // UploadPCAP 上传 PCAP 文件
 func (h *CaptureHandler) UploadPCAP(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(400, gin.H{"error": "No file uploaded"})
+		RespondBadRequest(c, "No file uploaded")
 		return
 	}
 
 	// 保存文件
 	filename := fmt.Sprintf("./uploads/%d_%s", time.Now().Unix(), file.Filename)
 	if err := c.SaveUploadedFile(file, filename); err != nil {
-		c.JSON(500, gin.H{"error": "Failed to save file"})
+		RespondInternalError(c, "Failed to save file")
 		return
 	}
 
@@ -586,9 +836,9 @@ func (h *CaptureHandler) UploadPCAP(c *gin.Context) {
 		database.GetDB().Save(session)
 	}()
 
-	c.JSON(200, gin.H{
-		"message":    "File uploaded successfully",
-		"session_id": session.ID,
+	RespondSuccess(c, gin.H{
+		"message":   "File uploaded successfully",
+		"sessionId": session.ID,
 	})
 }
 
@@ -614,7 +864,7 @@ func (h *CaptureHandler) GetPayload(c *gin.Context) {
 
 	var packet models.Packet
 	if err := database.GetDB().First(&packet, packetID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Packet not found"})
+		RespondNotFound(c, "Packet not found")
 		return
 	}
 
@@ -628,14 +878,14 @@ func (h *CaptureHandler) GetPayload(c *gin.Context) {
 	if packet.PayloadPath != "" && h.payloadStorage != nil {
 		payload, err := h.payloadStorage.Load(packet.PayloadPath)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to load payload"})
+			RespondInternalError(c, "Failed to load payload")
 			return
 		}
 		c.Data(200, "application/octet-stream", payload)
 		return
 	}
 
-	c.JSON(404, gin.H{"error": "Payload not found"})
+	RespondNotFound(c, "Payload not found")
 }
 
 // ExportSession 导出会话数据
@@ -650,7 +900,7 @@ func (h *CaptureHandler) ExportSession(c *gin.Context) {
 	// 获取会话信息
 	var session models.CaptureSession
 	if err := database.GetDB().First(&session, sessionID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Session not found"})
+		RespondNotFound(c, "Session not found")
 		return
 	}
 
@@ -659,7 +909,7 @@ func (h *CaptureHandler) ExportSession(c *gin.Context) {
 	database.GetDB().Where("session_id = ?", sessionID).Find(&packets)
 
 	if len(packets) == 0 {
-		c.JSON(404, gin.H{"error": "No packets found"})
+		RespondNotFound(c, "No packets found")
 		return
 	}
 
@@ -681,13 +931,13 @@ func (h *CaptureHandler) ExportSession(c *gin.Context) {
 	case "json":
 		filepath, err = h.exporter.ExportSessionToJSON(&session, packetPtrs)
 	default:
-		c.JSON(400, gin.H{"error": "Invalid format. Supported: pcap, csv, json"})
+		RespondBadRequest(c, "Invalid format. Supported: pcap, csv, json")
 		return
 	}
 
 	if err != nil {
 		logger.GetLogger().Errorf("Failed to export session: %v", err)
-		c.JSON(500, gin.H{"error": "Export failed"})
+		RespondInternalError(c, "Export failed")
 		return
 	}
 
@@ -702,7 +952,7 @@ func (h *CaptureHandler) DeleteSession(c *gin.Context) {
 	// 检查会话是否存在
 	var session models.CaptureSession
 	if err := database.GetDB().First(&session, sessionID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Session not found"})
+		RespondNotFound(c, "Session not found")
 		return
 	}
 
@@ -711,7 +961,7 @@ func (h *CaptureHandler) DeleteSession(c *gin.Context) {
 	id, _ := strconv.ParseUint(sessionID, 10, 32)
 	if _, exists := h.activeSessions[uint(id)]; exists {
 		h.mu.Unlock()
-		c.JSON(400, gin.H{"error": "Cannot delete running session"})
+		RespondBadRequest(c, "Cannot delete running session")
 		return
 	}
 	h.mu.Unlock()
@@ -722,5 +972,5 @@ func (h *CaptureHandler) DeleteSession(c *gin.Context) {
 	// 删除会话
 	database.GetDB().Delete(&session)
 
-	c.JSON(200, gin.H{"message": "Session deleted successfully"})
+	RespondSuccess(c, gin.H{"message": "Session deleted successfully"})
 }

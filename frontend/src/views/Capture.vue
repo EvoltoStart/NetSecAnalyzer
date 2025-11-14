@@ -208,9 +208,9 @@
             <el-tag>{{ row.type.toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="packet_count" label="数据包数量" width="120">
+        <el-table-column prop="packetCount" label="数据包数量" width="120">
           <template #default="{ row }">
-            {{ row.packet_count || 0 }}
+            {{ row.packetCount || 0 }}
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
@@ -222,7 +222,7 @@
         </el-table-column>
         <el-table-column label="开始时间" width="180">
           <template #default="{ row }">
-            {{ formatTime(row.start_time) }}
+            {{ formatTime(row.startTime) }}
           </template>
         </el-table-column>
         <el-table-column label="持续时间" width="120">
@@ -336,10 +336,11 @@ const filterTemplates = [
 const loadInterfaces = async () => {
   try {
     const res = await axios.get('/api/capture/interfaces')
-    interfaces.value = res.data.interfaces
+    // 标准响应格式: {success: true, data: {interfaces: [...]}}
+    interfaces.value = res.data.data.interfaces || []
     // 自动选择第一个非特殊接口
     if (interfaces.value.length > 0) {
-      const normalInterfaces = interfaces.value.filter(i => 
+      const normalInterfaces = interfaces.value.filter(i =>
         !['any', 'lo', 'bluetooth-monitor', 'nflog', 'nfqueue', 'dbus-system', 'dbus-session'].includes(i)
       )
       captureForm.value.interface = normalInterfaces.length > 0 ? normalInterfaces[0] : interfaces.value[0]
@@ -353,7 +354,8 @@ const loadSessions = async () => {
   sessionsLoading.value = true
   try {
     const res = await axios.get('/api/capture/sessions')
-    sessions.value = res.data.data || []
+    // 标准响应格式: {success: true, data: {sessions: [...]}, meta: {...}}
+    sessions.value = res.data.data.sessions || []
 
     // 检查是否有正在运行的会话
     const runningSession = sessions.value.find(s => s.status === 'running')
@@ -369,7 +371,8 @@ const loadSessions = async () => {
 const loadSerialPorts = async () => {
   try {
     const res = await axios.get('/api/capture/serial-ports')
-    serialPorts.value = res.data.ports || ['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyS0']
+    // 标准响应格式: {success: true, data: {ports: [...]}}
+    serialPorts.value = res.data.data.ports || ['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyS0']
     ElMessage.success('串口列表已刷新')
   } catch (error) {
     ElMessage.warning('无法获取串口列表，使用默认列表')
@@ -452,8 +455,9 @@ const startCapture = async () => {
       filter: captureForm.value.filter || ''
     })
 
+    // 标准响应格式: {success: true, data: {message: "...", sessionId: 123}}
     ElMessage.success({
-      message: `采集已启动！会话 ID: ${response.data.session_id}`,
+      message: `采集已启动！会话 ID: ${response.data.data.sessionId}`,
       duration: 3000
     })
 
@@ -556,10 +560,10 @@ const formatTime = (timestamp) => {
 
 // 计算持续时间
 const getDuration = (session) => {
-  if (!session.start_time) return 'N/A'
+  if (!session.startTime) return 'N/A'
 
-  const start = new Date(session.start_time)
-  const end = session.end_time ? new Date(session.end_time) : new Date()
+  const start = new Date(session.startTime)
+  const end = session.endTime ? new Date(session.endTime) : new Date()
 
   const durationMs = end - start
   const seconds = Math.floor(durationMs / 1000)
@@ -594,28 +598,28 @@ const setupWebSocket = () => {
   // 监听实时数据包
   wsClient.on('packet', (data) => {
     // 更新对应会话的数据包计数
-    const session = sessions.value.find(s => s.id === data.session_id)
+    const session = sessions.value.find(s => s.id === data.sessionId)
     if (session) {
-      session.packet_count = (session.packet_count || 0) + 1
+      session.packetCount = (session.packetCount || 0) + 1
     }
   })
 
   // 监听统计信息
   wsClient.on('stats', (data) => {
-    const session = sessions.value.find(s => s.id === data.session_id)
+    const session = sessions.value.find(s => s.id === data.sessionId)
     if (session) {
-      session.packet_count = data.packet_count
+      session.packetCount = data.packetCount
     }
   })
 
   // 监听完成消息
   wsClient.on('completed', (data) => {
-    const session = sessions.value.find(s => s.id === data.session_id)
+    const session = sessions.value.find(s => s.id === data.sessionId)
     if (session) {
       session.status = 'completed'
-      session.packet_count = data.packet_count
+      session.packetCount = data.packetCount
     }
-    ElMessage.success(`会话 ${data.session_id} 采集完成`)
+    ElMessage.success(`会话 ${data.sessionId} 采集完成`)
   })
 }
 

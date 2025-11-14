@@ -41,12 +41,13 @@ const loadProtocols = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/stats/protocol-distribution')
-    if (res.data.data) {
+    // 标准响应格式: {success: true, data: {protocols: [...]}}
+    if (res.data.data.protocols) {
       // 计算总数
-      const total = res.data.data.reduce((sum, item) => sum + item.value, 0)
+      const total = res.data.data.protocols.reduce((sum, item) => sum + item.value, 0)
 
       // 转换格式并计算百分比
-      protocols.value = res.data.data.map(item => ({
+      protocols.value = res.data.data.protocols.map(item => ({
         name: item.name,
         count: item.value,
         percentage: total > 0 ? ((item.value / total) * 100).toFixed(1) : 0
@@ -63,7 +64,8 @@ const loadProtocols = async () => {
 const loadSessions = async () => {
   try {
     const res = await axios.get('/api/capture/sessions')
-    sessions.value = res.data.data || []
+    // 标准响应格式: {success: true, data: {sessions: [...]}, meta: {...}}
+    sessions.value = res.data.data.sessions || []
   } catch (error) {
     console.error('加载会话列表失败:', error)
   }

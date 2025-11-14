@@ -154,3 +154,8 @@ func (r *Router) healthCheck(c *gin.Context) {
 func (r *Router) Run(addr string) error {
 	return r.engine.Run(addr)
 }
+
+// GetEngine 获取 Gin 引擎（用于优雅关机）
+func (r *Router) GetEngine() *gin.Engine {
+	return r.engine
+}

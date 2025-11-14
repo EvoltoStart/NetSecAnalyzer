@@ -50,13 +50,13 @@
                     <el-option
                       v-for="session in sessions"
                       :key="session.id"
-                      :label="`${session.name} (${session.packet_count} 个数据包)`"
+                      :label="`${session.name} (${session.packetCount} 个数据包)`"
                       :value="session.id"
                     >
                       <div style="display: flex; justify-content: space-between">
                         <span>{{ session.name }}</span>
                         <span style="color: var(--el-text-color-secondary); font-size: 12px">
-                          {{ session.packet_count }} 个数据包
+                          {{ session.packetCount }} 个数据包
                         </span>
                       </div>
                     </el-option>
@@ -636,16 +636,16 @@
                     </el-tag>
                   </el-descriptions-item>
                   <el-descriptions-item label="运行时间">
-                    {{ formatDuration(currentIDSTask.created_at) }}
+                    {{ formatDuration(currentIDSTask.createdAt) }}
                   </el-descriptions-item>
                   <el-descriptions-item label="检测事件">
-                    <el-tag type="info">{{ currentIDSTask.events_detected || 0 }}</el-tag>
+                    <el-tag type="info">{{ currentIDSTask.eventsDetected || 0 }}</el-tag>
                   </el-descriptions-item>
                   <el-descriptions-item label="告警数">
-                    <el-tag type="warning">{{ currentIDSTask.alerts_count || 0 }}</el-tag>
+                    <el-tag type="warning">{{ currentIDSTask.alertsCount || 0 }}</el-tag>
                   </el-descriptions-item>
                   <el-descriptions-item label="阻断数">
-                    <el-tag type="danger">{{ currentIDSTask.blocks_count || 0 }}</el-tag>
+                    <el-tag type="danger">{{ currentIDSTask.blocksCount || 0 }}</el-tag>
                   </el-descriptions-item>
                 </el-descriptions>
 
@@ -752,18 +752,18 @@
                 />
               </template>
             </el-table-column>
-            <el-table-column prop="created_at" label="创建时间" width="160">
+            <el-table-column prop="createdAt" label="创建时间" width="160">
               <template #default="{ row }">
-                {{ formatTime(row.created_at) }}
+                {{ formatTime(row.createdAt) }}
               </template>
             </el-table-column>
             <el-table-column label="结果" min-width="150">
               <template #default="{ row }">
                 <div v-if="row.type === 'replay' && row.result">
                   <span style="font-size: 12px">
-                    发送: {{ row.result.packets_sent || 0 }}
-                    <span v-if="row.result.packets_failed" style="color: var(--el-color-danger)">
-                      / 失败: {{ row.result.packets_failed }}
+                    发送: {{ row.result.packetsSent || 0 }}
+                    <span v-if="row.result.packetsFailed" style="color: var(--el-color-danger)">
+                      / 失败: {{ row.result.packetsFailed }}
                     </span>
                   </span>
                 </div>
@@ -840,10 +840,10 @@
             />
           </el-descriptions-item>
           <el-descriptions-item label="创建时间">
-            {{ formatTime(currentTask.created_at) }}
+            {{ formatTime(currentTask.createdAt) }}
           </el-descriptions-item>
           <el-descriptions-item label="完成时间">
-            {{ currentTask.completed_at ? formatTime(currentTask.completed_at) : '未完成' }}
+            {{ currentTask.completedAt ? formatTime(currentTask.completedAt) : '未完成' }}
           </el-descriptions-item>
           <el-descriptions-item label="目标" :span="2">
             {{ currentTask.target }}
@@ -914,16 +914,16 @@
 
           <el-descriptions :column="2" border>
             <el-descriptions-item label="发送数据包">
-              <el-tag type="success">{{ currentTask.result.packets_sent || 0 }}</el-tag>
+              <el-tag type="success">{{ currentTask.result.packetsSent || 0 }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="失败数">
-              <el-tag v-if="currentTask.result.packets_failed > 0" type="danger">
-                {{ currentTask.result.packets_failed }}
+              <el-tag v-if="currentTask.result.packetsFailed > 0" type="danger">
+                {{ currentTask.result.packetsFailed }}
               </el-tag>
               <span v-else>0</span>
             </el-descriptions-item>
             <el-descriptions-item label="速度倍率">
-              {{ currentTask.result.speed_multiplier || currentTask.parameters?.speed_multiplier || 1 }}x
+              {{ currentTask.result.speedMultiplier || currentTask.parameters?.speedMultiplier || 1 }}x
             </el-descriptions-item>
             <el-descriptions-item label="耗时">
               {{ currentTask.result.duration || 'N/A' }}
@@ -990,8 +990,8 @@
             <el-tag size="small">{{ row.protocol }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="src_addr" label="源地址" width="150" />
-        <el-table-column prop="dst_addr" label="目标地址" width="150" />
+        <el-table-column prop="srcAddr" label="源地址" width="150" />
+        <el-table-column prop="dstAddr" label="目标地址" width="150" />
         <el-table-column prop="length" label="长度" width="100">
           <template #default="{ row }">
             {{ row.length }} bytes
@@ -1201,17 +1201,18 @@ const loadTasks = async () => {
   tasksLoading.value = true
   try {
     const res = await axios.get('/api/attack/tasks')
-    if (res.data.data) {
-      allTasks.value = res.data.data
-      replayTasks.value = res.data.data.filter(t => t.type === 'replay')
-      fuzzTasks.value = res.data.data.filter(t => t.type === 'fuzzing')
+    // 标准响应格式: {success: true, data: {tasks: [...]}, meta: {...}}
+    const taskList = res.data.data.tasks || []
 
-      // 更新当前任务
-      const runningReplay = replayTasks.value.find(t => t.status === 'running')
-      const runningFuzz = fuzzTasks.value.find(t => t.status === 'running')
-      currentReplayTask.value = runningReplay || null
-      currentFuzzTask.value = runningFuzz || null
-    }
+    allTasks.value = taskList
+    replayTasks.value = taskList.filter(t => t.type === 'replay')
+    fuzzTasks.value = taskList.filter(t => t.type === 'fuzzing')
+
+    // 更新当前任务
+    const runningReplay = replayTasks.value.find(t => t.status === 'running')
+    const runningFuzz = fuzzTasks.value.find(t => t.status === 'running')
+    currentReplayTask.value = runningReplay || null
+    currentFuzzTask.value = runningFuzz || null
   } catch (error) {
     console.error('加载任务列表失败:', error)
     ElMessage.error('加载任务列表失败')
@@ -1250,8 +1251,8 @@ const showPreview = async () => {
     }
 
     if (replayForm.value.protocolFilter) params.protocol = replayForm.value.protocolFilter
-    if (replayForm.value.srcAddrFilter) params.src_addr = replayForm.value.srcAddrFilter
-    if (replayForm.value.dstAddrFilter) params.dst_addr = replayForm.value.dstAddrFilter
+    if (replayForm.value.srcAddrFilter) params.srcAddr = replayForm.value.srcAddrFilter
+    if (replayForm.value.dstAddrFilter) params.dstAddr = replayForm.value.dstAddrFilter
 
     const res = await axios.get(`/api/capture/sessions/${replayForm.value.sessionId}/packets`, { params })
     previewPackets.value = res.data.data || []
@@ -1520,11 +1521,10 @@ const stopIDS = async () => {
 const loadIDSTasks = async () => {
   try {
     const res = await axios.get('/api/defense/ids/tasks')
-    if (res.data.data) {
-      idsTasks.value = res.data.data
-      const running = idsTasks.value.find(t => t.status === 'running')
-      currentIDSTask.value = running || null
-    }
+    // 标准响应格式: {success: true, data: {tasks: [...]}, meta: {...}}
+    idsTasks.value = res.data.data.tasks || []
+    const running = idsTasks.value.find(t => t.status === 'running')
+    currentIDSTask.value = running || null
   } catch (error) {
     console.error('加载 IDS 任务失败:', error)
   }
@@ -1567,16 +1567,16 @@ const formatDuration = (startTime) => {
 
 // 获取最近告警列表
 const getRecentAlerts = (task) => {
-  if (!task || !task.recent_alerts) return []
+  if (!task || !task.recentAlerts) return []
 
   // 后端返回的格式是 {alerts: [...]}
-  if (task.recent_alerts.alerts && Array.isArray(task.recent_alerts.alerts)) {
-    return task.recent_alerts.alerts
+  if (task.recentAlerts.alerts && Array.isArray(task.recentAlerts.alerts)) {
+    return task.recentAlerts.alerts
   }
 
   // 兼容直接是数组的情况
-  if (Array.isArray(task.recent_alerts)) {
-    return task.recent_alerts
+  if (Array.isArray(task.recentAlerts)) {
+    return task.recentAlerts
   }
 
   return []
@@ -1709,8 +1709,8 @@ const getStatusText = (status) => {
 
 // 获取会话名称
 const getSessionName = (task) => {
-  if (task.parameters && task.parameters.session_name) {
-    return task.parameters.session_name
+  if (task.parameters && task.parameters.sessionName) {
+    return task.parameters.sessionName
   }
   return task.target || 'N/A'
 }
@@ -1730,27 +1730,27 @@ const getAnomalyCount = (task) => {
 
 // 计算成功率
 const calculateSuccessRate = (result) => {
-  if (!result || !result.packets_sent) return 0
-  const failed = result.packets_failed || 0
-  return Math.round(((result.packets_sent - failed) / result.packets_sent) * 100)
+  if (!result || !result.packetsSent) return 0
+  const failed = result.packetsFailed || 0
+  return Math.round(((result.packetsSent - failed) / result.packetsSent) * 100)
 }
 
 // 格式化参数键
 const formatParamKey = (key) => {
   const keyMap = {
-    'session_id': '会话 ID',
-    'session_name': '会话名称',
+    'sessionId': '会话 ID',
+    'sessionName': '会话名称',
     'interface': '网络接口',
-    'speed_multiplier': '速度倍率',
+    'speedMultiplier': '速度倍率',
     'mode': '重放模式',
-    'loop_count': '循环次数',
-    'packet_count': '数据包数量',
+    'loopCount': '循环次数',
+    'packetCount': '数据包数量',
     'target': '目标地址',
     'port': '端口',
     'protocol': '协议',
     'template': '模板',
     'iterations': '迭代次数',
-    'mutation_rate': '变异率',
+    'mutationRate': '变异率',
     'timeout': '超时时间'
   }
   return keyMap[key] || key

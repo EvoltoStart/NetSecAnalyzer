@@ -9,7 +9,6 @@ import (
 	"netsecanalyzer/internal/scanner"
 	"netsecanalyzer/pkg/logger"
 	"netsecanalyzer/pkg/utils"
-	"strconv"
 	"strings"
 	"time"
 
@@ -41,7 +40,7 @@ func (h *ScanHandler) StartScan(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		RespondBadRequest(c, err.Error())
 		return
 	}
 
@@ -81,9 +80,9 @@ func (h *ScanHandler) StartScan(c *gin.Context) {
 		}
 	}()
 
-	c.JSON(200, gin.H{
+	RespondSuccess(c, gin.H{
 		"message": "Scan started",
-		"task_id": task.ID,
+		"taskId":  task.ID,
 	})
 }
 
@@ -456,17 +455,41 @@ func (h *ScanHandler) scanRS485Bus(ctx context.Context, task *models.ScanTask, r
 		task.ID, rs485Duration, result.TotalDevices, len(result.Vulnerabilities))
 }
 
-// ListTasks 列出扫描任务
+// ListTasks 列出扫描任务（支持分页）
 func (h *ScanHandler) ListTasks(c *gin.Context) {
+	// 获取分页参数
+	params := GetPaginationParams(c)
+
+	// 查询总数
+	var total int64
+	database.GetDB().Model(&models.ScanTask{}).Count(&total)
+
+	// 查询任务列表
 	var tasks []models.ScanTask
-	database.GetDB().Order("created_at DESC").Find(&tasks)
-	c.JSON(200, gin.H{"tasks": tasks})
+	database.GetDB().
+		Order("created_at DESC").
+		Offset(params.GetOffset()).
+		Limit(params.GetLimit()).
+		Find(&tasks)
+
+	// 计算元数据
+	meta := CalculateMeta(total, params.Page, params.PageSize)
+
+	// 返回标准响应
+	RespondSuccessWithMeta(c, gin.H{"tasks": tasks}, meta)
 }
 
 // GetTask 获取任务详情
 func (h *ScanHandler) GetTask(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
-	c.JSON(200, gin.H{"id": id})
+	taskID := c.Param("id")
+
+	var task models.ScanTask
+	if err := database.GetDB().First(&task, taskID).Error; err != nil {
+		RespondNotFound(c, "Task not found")
+		return
+	}
+
+	RespondSuccess(c, gin.H{"task": task})
 }
 
 // HandleWebSocket WebSocket 处理
@@ -481,7 +504,7 @@ func (h *ScanHandler) GetTaskResults(c *gin.Context) {
 	// 获取任务信息
 	var task models.ScanTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Task not found"})
+		RespondNotFound(c, "Task not found")
 		return
 	}
 
@@ -489,7 +512,7 @@ func (h *ScanHandler) GetTaskResults(c *gin.Context) {
 	var results []models.ScanResult
 	database.GetDB().Where("task_id = ?", taskID).Find(&results)
 
-	c.JSON(200, gin.H{
+	RespondSuccess(c, gin.H{
 		"task":    task,
 		"results": results,
 	})
@@ -503,7 +526,7 @@ func (h *ScanHandler) GetTaskVulnerabilities(c *gin.Context) {
 	var results []models.ScanResult
 	database.GetDB().Where("task_id = ? AND result_type = ?", taskID, "vulnerability").Find(&results)
 
-	c.JSON(200, gin.H{
+	RespondSuccess(c, gin.H{
 		"vulnerabilities": results,
 	})
 }
@@ -515,7 +538,7 @@ func (h *ScanHandler) StopTask(c *gin.Context) {
 	// 获取任务
 	var task models.ScanTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Task not found"})
+		RespondNotFound(c, "Task not found")
 		return
 	}
 
@@ -523,7 +546,7 @@ func (h *ScanHandler) StopTask(c *gin.Context) {
 	task.Status = "stopped"
 	database.GetDB().Save(&task)
 
-	c.JSON(200, gin.H{"message": "Task stopped"})
+	RespondSuccess(c, gin.H{"message": "Task stopped"})
 }
 
 // DeleteTask 删除扫描任务
@@ -536,7 +559,7 @@ func (h *ScanHandler) DeleteTask(c *gin.Context) {
 	// 删除任务
 	database.GetDB().Delete(&models.ScanTask{}, taskID)
 
-	c.JSON(200, gin.H{"message": "Task deleted"})
+	RespondSuccess(c, gin.H{"message": "Task deleted"})
 }
 
 // ExportTaskResults 导出扫描结果
@@ -551,7 +574,7 @@ func (h *ScanHandler) ExportTaskResults(c *gin.Context) {
 	// 获取任务信息
 	var task models.ScanTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Task not found"})
+		RespondNotFound(c, "Task not found")
 		return
 	}
 
@@ -560,7 +583,7 @@ func (h *ScanHandler) ExportTaskResults(c *gin.Context) {
 	database.GetDB().Where("task_id = ?", taskID).Find(&results)
 
 	if len(results) == 0 {
-		c.JSON(404, gin.H{"error": "No results found"})
+		RespondNotFound(c, "No results found")
 		return
 	}
 
@@ -580,13 +603,13 @@ func (h *ScanHandler) ExportTaskResults(c *gin.Context) {
 	case "json":
 		filepath, err = h.exporter.ExportScanResultToJSON(&task, resultPtrs)
 	default:
-		c.JSON(400, gin.H{"error": "Invalid format. Supported: csv, json"})
+		RespondBadRequest(c, "Invalid format. Supported: csv, json")
 		return
 	}
 
 	if err != nil {
 		logger.GetLogger().Errorf("Failed to export scan results: %v", err)
-		c.JSON(500, gin.H{"error": "Export failed"})
+		RespondInternalError(c, "Export failed")
 		return
 	}
 

@@ -31,13 +31,13 @@
         <el-descriptions-item label="任务名称">{{ task.name || 'N/A' }}</el-descriptions-item>
         <el-descriptions-item label="目标">{{ task.target }}</el-descriptions-item>
         <el-descriptions-item label="扫描类型">
-          <el-tag>{{ task.scan_type?.toUpperCase() }}</el-tag>
+          <el-tag>{{ task.scanType?.toUpperCase() }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag :type="getStatusType(task.status)">{{ task.status }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="开始时间">{{ formatTime(task.start_time) }}</el-descriptions-item>
-        <el-descriptions-item label="结束时间">{{ formatTime(task.end_time) }}</el-descriptions-item>
+        <el-descriptions-item label="开始时间">{{ formatTime(task.startTime) }}</el-descriptions-item>
+        <el-descriptions-item label="结束时间">{{ formatTime(task.endTime) }}</el-descriptions-item>
         <el-descriptions-item label="进度">
           <el-progress :percentage="task.progress || 0" />
         </el-descriptions-item>
@@ -111,7 +111,7 @@
               </template>
             </el-table-column>
             <el-table-column prop="title" label="漏洞标题" width="250" show-overflow-tooltip />
-            <el-table-column prop="vuln_type" label="类型" width="150" />
+            <el-table-column prop="vulnType" label="类型" width="150" />
             <el-table-column prop="cve" label="CVE" width="150" />
             <el-table-column prop="cvss" label="CVSS" width="100">
               <template #default="{ row }">
@@ -130,9 +130,9 @@
         <el-tab-pane label="全部结果" name="all">
           <el-table :data="results" stripe border v-loading="loading">
             <el-table-column prop="id" label="ID" width="80" />
-            <el-table-column prop="result_type" label="类型" width="120">
+            <el-table-column prop="resultType" label="类型" width="120">
               <template #default="{ row }">
-                <el-tag size="small">{{ row.result_type }}</el-tag>
+                <el-tag size="small">{{ row.resultType }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="port" label="端口" width="100" />
@@ -151,7 +151,7 @@
         <el-descriptions-item label="协议">{{ currentVuln.protocol }}</el-descriptions-item>
         <el-descriptions-item label="服务">{{ currentVuln.service }}</el-descriptions-item>
         <el-descriptions-item label="版本">{{ currentVuln.version }}</el-descriptions-item>
-        <el-descriptions-item label="漏洞类型">{{ currentVuln.vuln_type }}</el-descriptions-item>
+        <el-descriptions-item label="漏洞类型">{{ currentVuln.vulnType }}</el-descriptions-item>
         <el-descriptions-item label="严重程度">
           <el-tag :type="getSeverityType(currentVuln.severity)">{{ currentVuln.severity }}</el-tag>
         </el-descriptions-item>
@@ -200,14 +200,14 @@ const currentVuln = ref(null)
 
 // 计算统计数据
 const stats = computed(() => {
-  const openPorts = results.value.filter(r => r.result_type === 'port').length
+  const openPorts = results.value.filter(r => r.resultType === 'port').length
   // 识别服务：统计有版本或 Banner 信息的端口
   const services = results.value.filter(r =>
-    r.result_type === 'port' && (r.version || r.banner || r.result_type === 'service')
+    r.resultType === 'port' && (r.version || r.banner || r.resultType === 'service')
   ).length
-  const vulnerabilities = results.value.filter(r => r.result_type === 'vulnerability').length
+  const vulnerabilities = results.value.filter(r => r.resultType === 'vulnerability').length
   const criticalVulns = results.value.filter(r =>
-    r.result_type === 'vulnerability' && (r.severity === 'critical' || r.severity === 'high')
+    r.resultType === 'vulnerability' && (r.severity === 'critical' || r.severity === 'high')
   ).length
 
   return { openPorts, services, vulnerabilities, criticalVulns }
@@ -215,12 +215,12 @@ const stats = computed(() => {
 
 // 端口扫描结果
 const portResults = computed(() => {
-  return results.value.filter(r => r.result_type === 'port' || r.result_type === 'service')
+  return results.value.filter(r => r.resultType === 'port' || r.resultType === 'service')
 })
 
 // 漏洞结果
 const vulnResults = computed(() => {
-  return results.value.filter(r => r.result_type === 'vulnerability')
+  return results.value.filter(r => r.resultType === 'vulnerability')
 })
 
 // 加载扫描结果
@@ -228,8 +228,9 @@ const loadResults = async () => {
   loading.value = true
   try {
     const res = await axios.get(`/api/scan/tasks/${taskId.value}/results`)
-    task.value = res.data.task
-    results.value = res.data.results || []
+    // 标准响应格式: {success: true, data: {task: {...}, results: [...]}}
+    task.value = res.data.data.task
+    results.value = res.data.data.results || []
   } catch (error) {
     ElMessage.error('加载扫描结果失败: ' + (error.response?.data?.error || error.message))
   } finally {

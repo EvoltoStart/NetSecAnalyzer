@@ -36,7 +36,7 @@
         <el-descriptions-item label="状态">
           <el-tag :type="getStatusType(session.status)">{{ session.status }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="数据包数量">{{ session.packet_count || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="数据包数量">{{ session.packetCount || 0 }}</el-descriptions-item>
       </el-descriptions>
 
       <!-- 过滤器 -->
@@ -86,21 +86,21 @@
         </el-table-column>
         <el-table-column label="分析结果" width="200">
           <template #default="{ row }">
-            <div v-if="row.analysis_result">
+            <div v-if="row.analysisResult">
               <el-tag size="small" type="success">
-                {{ row.analysis_result.protocol || row.protocol }}
+                {{ row.analysisResult.protocol || row.protocol }}
               </el-tag>
-              <el-tag v-if="row.analysis_result.anomalies" size="small" type="danger" style="margin-left: 5px">
+              <el-tag v-if="row.analysisResult.anomalies" size="small" type="danger" style="margin-left: 5px">
                 异常
               </el-tag>
             </div>
             <el-tag v-else size="small" type="info">未分析</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="src_addr" label="源地址" width="150" />
-        <el-table-column prop="src_port" label="源端口" width="100" />
-        <el-table-column prop="dst_addr" label="目标地址" width="150" />
-        <el-table-column prop="dst_port" label="目标端口" width="100" />
+        <el-table-column prop="srcAddr" label="源地址" width="150" />
+        <el-table-column prop="srcPort" label="源端口" width="100" />
+        <el-table-column prop="dstAddr" label="目标地址" width="150" />
+        <el-table-column prop="dstPort" label="目标端口" width="100" />
         <el-table-column prop="length" label="长度" width="100">
           <template #default="{ row }">
             {{ row.length }} bytes
@@ -140,39 +140,39 @@
           <el-tag>{{ currentPacket.protocol }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="长度">{{ currentPacket.length }} bytes</el-descriptions-item>
-        <el-descriptions-item label="源地址">{{ currentPacket.src_addr }}</el-descriptions-item>
-        <el-descriptions-item label="源端口">{{ currentPacket.src_port || 'N/A' }}</el-descriptions-item>
-        <el-descriptions-item label="目标地址">{{ currentPacket.dst_addr }}</el-descriptions-item>
-        <el-descriptions-item label="目标端口">{{ currentPacket.dst_port || 'N/A' }}</el-descriptions-item>
+        <el-descriptions-item label="源地址">{{ currentPacket.srcAddr }}</el-descriptions-item>
+        <el-descriptions-item label="源端口">{{ currentPacket.srcPort || 'N/A' }}</el-descriptions-item>
+        <el-descriptions-item label="目标地址">{{ currentPacket.dstAddr }}</el-descriptions-item>
+        <el-descriptions-item label="目标端口">{{ currentPacket.dstPort || 'N/A' }}</el-descriptions-item>
       </el-descriptions>
 
       <el-divider>协议分析结果</el-divider>
-      <div v-if="currentPacket?.analysis_result">
+      <div v-if="currentPacket?.analysisResult">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="识别协议">
-            <el-tag type="success">{{ currentPacket.analysis_result.protocol }}</el-tag>
+            <el-tag type="success">{{ currentPacket.analysisResult.protocol }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="版本" v-if="currentPacket.analysis_result.version">
-            {{ currentPacket.analysis_result.version }}
+          <el-descriptions-item label="版本" v-if="currentPacket.analysisResult.version">
+            {{ currentPacket.analysisResult.version }}
           </el-descriptions-item>
-          <el-descriptions-item label="方法" v-if="currentPacket.analysis_result.method">
-            <el-tag>{{ currentPacket.analysis_result.method }}</el-tag>
+          <el-descriptions-item label="方法" v-if="currentPacket.analysisResult.method">
+            <el-tag>{{ currentPacket.analysisResult.method }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="URI" v-if="currentPacket.analysis_result.uri" :span="2">
-            {{ currentPacket.analysis_result.uri }}
+          <el-descriptions-item label="URI" v-if="currentPacket.analysisResult.uri" :span="2">
+            {{ currentPacket.analysisResult.uri }}
           </el-descriptions-item>
-          <el-descriptions-item label="状态码" v-if="currentPacket.analysis_result.status_code">
-            <el-tag :type="currentPacket.analysis_result.status_code >= 400 ? 'danger' : 'success'">
-              {{ currentPacket.analysis_result.status_code }}
+          <el-descriptions-item label="状态码" v-if="currentPacket.analysisResult.status_code">
+            <el-tag :type="currentPacket.analysisResult.status_code >= 400 ? 'danger' : 'success'">
+              {{ currentPacket.analysisResult.status_code }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="摘要" :span="2">
-            {{ currentPacket.analysis_result.summary }}
+            {{ currentPacket.analysisResult.summary }}
           </el-descriptions-item>
         </el-descriptions>
 
         <!-- 异常检测结果 -->
-        <div v-if="currentPacket.analysis_result.anomalies && currentPacket.analysis_result.anomalies.length > 0" style="margin-top: 15px;">
+        <div v-if="currentPacket.analysisResult.anomalies && currentPacket.analysisResult.anomalies.length > 0" style="margin-top: 15px;">
           <el-alert
             title="检测到异常"
             type="warning"
@@ -180,7 +180,7 @@
             style="margin-bottom: 10px"
           >
             <ul style="margin: 5px 0; padding-left: 20px;">
-              <li v-for="(anomaly, index) in currentPacket.analysis_result.anomalies" :key="index">
+              <li v-for="(anomaly, index) in currentPacket.analysisResult.anomalies" :key="index">
                 {{ anomaly }}
               </li>
             </ul>
@@ -188,9 +188,9 @@
         </div>
 
         <!-- 详细字段 -->
-        <div v-if="currentPacket.analysis_result.fields && Object.keys(currentPacket.analysis_result.fields).length > 0" style="margin-top: 15px;">
+        <div v-if="currentPacket.analysisResult.fields && Object.keys(currentPacket.analysisResult.fields).length > 0" style="margin-top: 15px;">
           <el-divider content-position="left">详细字段</el-divider>
-          <el-table :data="formatFields(currentPacket.analysis_result.fields)" border size="small">
+          <el-table :data="formatFields(currentPacket.analysisResult.fields)" border size="small">
             <el-table-column prop="key" label="字段" width="200" />
             <el-table-column prop="value" label="值" />
           </el-table>
@@ -250,7 +250,8 @@ const pagination = ref({
 const loadSession = async () => {
   try {
     const res = await axios.get(`/api/capture/sessions/${sessionId.value}`)
-    session.value = res.data
+    // 标准响应格式: {success: true, data: {session: {...}}}
+    session.value = res.data.data.session
   } catch (error) {
     ElMessage.error('加载会话信息失败')
   }
@@ -266,8 +267,8 @@ const loadPackets = async () => {
     }
 
     if (filter.value.protocol) params.protocol = filter.value.protocol
-    if (filter.value.srcAddr) params.src_addr = filter.value.srcAddr
-    if (filter.value.dstAddr) params.dst_addr = filter.value.dstAddr
+    if (filter.value.srcAddr) params.srcAddr = filter.value.srcAddr
+    if (filter.value.dstAddr) params.dstAddr = filter.value.dstAddr
 
     console.log('=== loadPackets ===')
     console.log('filter:', filter.value)
@@ -276,8 +277,9 @@ const loadPackets = async () => {
     const res = await axios.get(`/api/capture/sessions/${sessionId.value}/packets`, { params })
     console.log('response:', res.data)
 
-    packets.value = res.data.data || []
-    pagination.value.total = res.data.total || 0
+    // 标准响应格式: {success: true, data: {packets: [...]}, meta: {total: 10, ...}}
+    packets.value = res.data.data.packets || []
+    pagination.value.total = res.data.meta?.total || 0
   } catch (error) {
     ElMessage.error('加载数据包失败: ' + (error.response?.data?.error || error.message))
   } finally {
@@ -397,7 +399,7 @@ const getStatusType = (status) => {
 
 // 获取行类名（异常数据包高亮）
 const getRowClassName = ({ row }) => {
-  if (row.analysis_result && row.analysis_result.anomalies && row.analysis_result.anomalies.length > 0) {
+  if (row.analysisResult && row.analysisResult.anomalies && row.analysisResult.anomalies.length > 0) {
     return 'anomaly-row'
   }
   return ''
@@ -419,12 +421,12 @@ const analyzePacket = async () => {
   analyzing.value = true
   try {
     const res = await axios.get(`/api/analyze/packets/${currentPacket.value.id}/result`)
-    currentPacket.value.analysis_result = res.data.analysis
+    currentPacket.value.analysisResult = res.data.analysis
 
     // 更新列表中的数据包
     const index = packets.value.findIndex(p => p.id === currentPacket.value.id)
     if (index !== -1) {
-      packets.value[index].analysis_result = res.data.analysis
+      packets.value[index].analysisResult = res.data.analysis
     }
 
     ElMessage.success('分析完成')

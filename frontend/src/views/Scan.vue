@@ -121,9 +121,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="target" label="目标" />
-        <el-table-column prop="scan_type" label="类型" width="120">
+        <el-table-column prop="scanType" label="类型" width="120">
           <template #default="{ row }">
-            <el-tag size="small">{{ row.scan_type }}</el-tag>
+            <el-tag size="small">{{ row.scanType }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
@@ -136,9 +136,9 @@
             <el-progress :percentage="row.progress || 0" />
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="createdAt" label="创建时间" width="180">
           <template #default="{ row }">
-            {{ formatTime(row.created_at) }}
+            {{ formatTime(row.createdAt) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
@@ -153,7 +153,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh } from '@element-plus/icons-vue'
@@ -209,10 +209,8 @@ const loadTasks = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/scan/tasks')
-    console.log('任务列表响应:', res.data)
-    // 后端返回 {tasks: [...]}，不是 {data: [...]}
-    tasks.value = res.data.tasks || res.data.data || []
-    console.log('加载的任务数量:', tasks.value.length)
+    // 标准响应格式: {success: true, data: {tasks: [...]}, meta: {...}}
+    tasks.value = res.data.data.tasks || []
   } catch (error) {
     console.error('加载任务列表失败:', error)
     ElMessage.error('加载任务列表失败: ' + (error.response?.data?.error || error.message))
@@ -280,7 +278,7 @@ const startScan = async () => {
 
     loadingMsg.close()
     ElMessage.success({
-      message: `扫描已启动！任务 ID: ${response.data.task_id}`,
+      message: `扫描已启动！任务 ID: ${response.data.taskId}`,
       duration: 3000
     })
 
@@ -354,11 +352,22 @@ const formatTime = (timeStr) => {
   }
 }
 
+// 定时器引用
+let refreshTimer = null
+
 onMounted(() => {
   console.log('扫描页面已挂载，开始加载任务列表')
   loadTasks()
   // 每10秒刷新任务列表
-  setInterval(loadTasks, 10000)
+  refreshTimer = setInterval(loadTasks, 10000)
+})
+
+onUnmounted(() => {
+  // 清理定时器
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
 })
 </script>
 

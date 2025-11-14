@@ -190,7 +190,8 @@ const formatNumber = (num) => {
 const loadOverviewStats = async () => {
   try {
     const res = await axios.get('/api/stats/overview')
-    stats.value = res.data
+    // 标准响应格式: {success: true, data: {...}}
+    stats.value = res.data.data
   } catch (error) {
     console.error('Failed to load overview stats:', error)
   }
@@ -200,8 +201,9 @@ const loadOverviewStats = async () => {
 const loadProtocolDistribution = async () => {
   try {
     const res = await axios.get('/api/stats/protocol-distribution')
-    if (res.data.data && res.data.data.length > 0) {
-      protocolChartOption.value.series[0].data = res.data.data
+    // 标准响应格式: {success: true, data: {protocols: [...]}}
+    if (res.data.data.protocols && res.data.data.protocols.length > 0) {
+      protocolChartOption.value.series[0].data = res.data.data.protocols
     }
   } catch (error) {
     console.error('Failed to load protocol distribution:', error)
@@ -212,9 +214,10 @@ const loadProtocolDistribution = async () => {
 const loadTrafficTrend = async () => {
   try {
     const res = await axios.get('/api/stats/traffic-trend')
-    if (res.data.times && res.data.counts) {
-      trafficChartOption.value.xAxis.data = res.data.times
-      trafficChartOption.value.series[0].data = res.data.counts
+    // 标准响应格式: {success: true, data: {times: [...], counts: [...]}}
+    if (res.data.data.times && res.data.data.counts) {
+      trafficChartOption.value.xAxis.data = res.data.data.times
+      trafficChartOption.value.series[0].data = res.data.data.counts
     }
   } catch (error) {
     console.error('Failed to load traffic trend:', error)
