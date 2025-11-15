@@ -149,17 +149,27 @@ func (c *IPCapture) processPacket(packet gopacket.Packet) {
 		pkt.Protocol = "ICMP"
 	}
 
-	// 提取应用层数据
+	// 提取payload数据 - 修复：确保所有数据包都有payload
+	// 首先尝试获取应用层数据
+	var payload []byte
 	if appLayer := packet.ApplicationLayer(); appLayer != nil {
-		payload := appLayer.Payload()
-		if len(payload) > 0 {
-			// 限制 payload 大小
-			maxPayloadSize := 4096
-			if len(payload) > maxPayloadSize {
-				pkt.Payload = payload[:maxPayloadSize]
-			} else {
-				pkt.Payload = payload
-			}
+		payload = appLayer.Payload()
+	}
+
+	// 如果没有应用层数据，使用完整的数据包数据
+	if len(payload) == 0 {
+		payload = packet.Data()
+	}
+
+	// 保存payload（限制大小）
+	if len(payload) > 0 {
+		maxPayloadSize := 4096
+		if len(payload) > maxPayloadSize {
+			pkt.Payload = make([]byte, maxPayloadSize)
+			copy(pkt.Payload, payload[:maxPayloadSize])
+		} else {
+			pkt.Payload = make([]byte, len(payload))
+			copy(pkt.Payload, payload)
 		}
 	}
 

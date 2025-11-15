@@ -42,6 +42,7 @@ func NewAnalyzer() *Analyzer {
 
 	// 注册内置解析器
 	a.RegisterParser(&HTTPParser{})
+	a.RegisterParser(&HTTPSParser{})
 	a.RegisterParser(&DNSParser{})
 	a.RegisterParser(&ModbusParser{})
 	a.RegisterParser(&FTPParser{})

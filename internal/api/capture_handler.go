@@ -761,6 +761,16 @@ func (h *CaptureHandler) GetPackets(c *gin.Context) {
 
 	logger.GetLogger().Infof("GetPackets - returned %d packets", len(packets))
 
+	// 确保payload数据正确返回给前端
+	for i := range packets {
+		// 如果payload在文件中，加载它
+		if len(packets[i].Payload) == 0 && packets[i].PayloadPath != "" && h.payloadStorage != nil {
+			if payload, err := h.payloadStorage.Load(packets[i].PayloadPath); err == nil {
+				packets[i].Payload = payload
+			}
+		}
+	}
+
 	// 计算元数据
 	meta := CalculateMeta(total, params.Page, params.PageSize)
 
