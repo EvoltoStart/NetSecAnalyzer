@@ -1177,7 +1177,7 @@ let refreshTimer = null
 const loadSessions = async () => {
   try {
     const res = await axios.get('/api/capture/sessions')
-    sessions.value = res.data.data || []
+    sessions.value = res.data.data.sessions || []
   } catch (error) {
     console.error('加载会话列表失败:', error)
   }
@@ -1187,7 +1187,7 @@ const loadSessions = async () => {
 const loadInterfaces = async () => {
   try {
     const res = await axios.get('/api/capture/interfaces')
-    interfaces.value = res.data.data || []
+    interfaces.value = res.data.data.interfaces || []
     if (interfaces.value.length > 0) {
       replayForm.value.interface = interfaces.value[0].name
     }
@@ -1230,8 +1230,9 @@ const onSessionChange = async () => {
     const res = await axios.get(`/api/capture/sessions/${replayForm.value.sessionId}/packets`, {
       params: { page: 1, page_size: 1 }
     })
-    totalPacketCount.value = res.data.total || 0
-    filteredPacketCount.value = res.data.total || 0
+    // 标准响应格式: {success: true, data: {packets: [...]}, meta: {total: ...}}
+    totalPacketCount.value = res.data.meta?.total || 0
+    filteredPacketCount.value = res.data.meta?.total || 0
   } catch (error) {
     console.error('加载数据包统计失败:', error)
   }
@@ -1255,8 +1256,9 @@ const showPreview = async () => {
     if (replayForm.value.dstAddrFilter) params.dstAddr = replayForm.value.dstAddrFilter
 
     const res = await axios.get(`/api/capture/sessions/${replayForm.value.sessionId}/packets`, { params })
-    previewPackets.value = res.data.data || []
-    filteredPacketCount.value = res.data.total || 0
+    // 标准响应格式: {success: true, data: {packets: [...]}, meta: {total: ...}}
+    previewPackets.value = res.data.data.packets || []
+    filteredPacketCount.value = res.data.meta?.total || 0
   } catch (error) {
     ElMessage.error('加载数据包失败')
   } finally {

@@ -88,7 +88,7 @@ type AttackLog struct {
 // AttackTask 攻击任务
 type AttackTask struct {
 	ID          uint       `gorm:"primaryKey" json:"id"`
-	TaskID      string     `gorm:"size:100;uniqueIndex;not null" json:"taskId"`
+	TaskID      string     `gorm:"size:100;uniqueIndex:uni_attack_tasks_task_id;not null" json:"taskId"`
 	Type        string     `gorm:"size:50;not null;index" json:"type"`    // replay, fuzzing
 	Target      string     `gorm:"size:500;not null" json:"target"`       // 目标地址或接口
 	Status      string     `gorm:"size:50;not null;index" json:"status"`  // running, completed, failed, stopped
@@ -103,7 +103,7 @@ type AttackTask struct {
 // DefenseTask 防御任务
 type DefenseTask struct {
 	ID             uint       `gorm:"primaryKey" json:"id"`
-	TaskID         string     `gorm:"size:100;uniqueIndex;not null" json:"taskId"`
+	TaskID         string     `gorm:"size:100;uniqueIndex:uni_defense_tasks_task_id;not null" json:"taskId"`
 	Type           string     `gorm:"size:50;not null;index" json:"type"`      // ids, firewall, filter
 	Interface      string     `gorm:"size:100" json:"interface"`               // 监听接口
 	Status         string     `gorm:"size:50;not null;index" json:"status"`    // running, stopped

@@ -5,9 +5,13 @@ import (
 	"log"
 	"netsecanalyzer/internal/config"
 	"netsecanalyzer/internal/models"
+	"os"
+	"path/filepath"
+	"reflect"
 	"time"
 
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -16,34 +20,79 @@ var DB *gorm.DB
 
 // InitDB 初始化数据库连接
 func InitDB(cfg *config.DatabaseConfig) error {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-		cfg.User,
-		cfg.Password,
-		cfg.Host,
-		cfg.Port,
-		cfg.DBName,
-		cfg.Charset,
-	)
-
+	var dialector gorm.Dialector
 	var err error
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn), // 只打印警告和错误，不打印所有 SQL
+
+	// 根据配置选择数据库驱动
+	switch cfg.Type {
+	case "sqlite":
+		// SQLite 模式
+		dbPath := cfg.DBName
+		if dbPath == "" {
+			dbPath = "./data/netsecanalyzer.db"
+		}
+
+		// 确保数据目录存在
+		dbDir := filepath.Dir(dbPath)
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			return fmt.Errorf("failed to create database directory: %w", err)
+		}
+
+		dialector = sqlite.Open(dbPath)
+		log.Printf("Using SQLite database: %s", dbPath)
+
+	case "mysql", "":
+		// MySQL 模式（默认）
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+			cfg.User,
+			cfg.Password,
+			cfg.Host,
+			cfg.Port,
+			cfg.DBName,
+			cfg.Charset,
+		)
+		dialector = mysql.Open(dsn)
+		log.Printf("Using MySQL database: %s@%s:%d/%s", cfg.User, cfg.Host, cfg.Port, cfg.DBName)
+
+	default:
+		return fmt.Errorf("unsupported database type: %s (supported: mysql, sqlite)", cfg.Type)
+	}
+
+	// 打开数据库连接
+	DB, err = gorm.Open(dialector, &gorm.Config{
+		Logger:                                   logger.Default.LogMode(logger.Warn), // 只打印警告和错误，不打印所有 SQL
+		DisableForeignKeyConstraintWhenMigrating: true,                                // 禁用外键约束管理
+		SkipDefaultTransaction:                   true,                                // 跳过默认事务，提升性能
 	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 
+	// 配置连接池
 	sqlDB, err := DB.DB()
 	if err != nil {
 		return fmt.Errorf("failed to get database instance: %w", err)
 	}
 
-	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
-	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	// 设置连接池参数（SQLite 建议较小的值）
+	maxIdleConns := cfg.MaxIdleConns
+	maxOpenConns := cfg.MaxOpenConns
+	if cfg.Type == "sqlite" {
+		// SQLite 不支持高并发，限制连接数
+		if maxIdleConns > 5 {
+			maxIdleConns = 5
+		}
+		if maxOpenConns > 10 {
+			maxOpenConns = 10
+		}
+	}
+
+	sqlDB.SetMaxIdleConns(maxIdleConns)
+	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	// 自动迁移数据库表
-	if err := autoMigrate(); err != nil {
+	if err := autoMigrateSafely(); err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)
 	}
 
@@ -69,6 +118,42 @@ func autoMigrate() error {
 		&models.DefenseTask{},
 		&models.ProtocolStat{},
 	)
+}
+
+// autoMigrateSafely 安全地自动迁移所有表
+// 使用 Migrator 的 CreateTable 方法来避免 GORM 的外键约束 bug
+func autoMigrateSafely() error {
+	models := []interface{}{
+		&models.CaptureSession{},
+		&models.Packet{},
+		&models.Vulnerability{},
+		&models.ScanTask{},
+		&models.ScanResult{},
+		&models.AttackLog{},
+		&models.AttackTask{},
+		&models.DefenseTask{},
+		&models.ProtocolStat{},
+	}
+
+	migrator := DB.Migrator()
+
+	for _, model := range models {
+		tableName := DB.NamingStrategy.TableName(reflect.TypeOf(model).Elem().Name())
+
+		if !migrator.HasTable(model) {
+			// 表不存在，使用 CreateTable 创建
+			log.Printf("Creating table: %s", tableName)
+			if err := migrator.CreateTable(model); err != nil {
+				return fmt.Errorf("failed to create table %s: %w", tableName, err)
+			}
+		} else {
+			// 表已存在，跳过迁移（避免 GORM 的索引处理 bug）
+			log.Printf("Table %s already exists, skipping migration", tableName)
+			// 如果将来需要添加新列，可以使用 migrator.AddColumn()
+		}
+	}
+
+	return nil
 }
 
 // GetDB 获取数据库实例

@@ -68,7 +68,6 @@ func (r *Router) setupRoutes() {
 			capture.GET("/sessions", r.captureHandler.ListSessions)
 			capture.GET("/sessions/:id", r.captureHandler.GetSession)
 			capture.GET("/sessions/:id/packets", r.captureHandler.GetPackets)
-			capture.GET("/sessions/:id/export", r.captureHandler.ExportSession)
 			capture.DELETE("/sessions/:id", r.captureHandler.DeleteSession)
 			capture.GET("/interfaces", r.captureHandler.GetInterfaces)
 			capture.GET("/serial-ports", r.captureHandler.GetSerialPorts)
@@ -101,7 +100,6 @@ func (r *Router) setupRoutes() {
 			scan.GET("/tasks/:id/vulnerabilities", r.scanHandler.GetTaskVulnerabilities)
 			scan.POST("/tasks/:id/stop", r.scanHandler.StopTask)
 			scan.DELETE("/tasks/:id", r.scanHandler.DeleteTask)
-			scan.GET("/tasks/:id/export", r.scanHandler.ExportTaskResults)
 		}
 
 		// 攻防模拟
@@ -144,7 +142,7 @@ func (r *Router) setupRoutes() {
 
 // healthCheck 健康检查
 func (r *Router) healthCheck(c *gin.Context) {
-	c.JSON(200, gin.H{
+	RespondSuccess(c, gin.H{
 		"status": "ok",
 		"time":   time.Now().Format(time.RFC3339),
 	})

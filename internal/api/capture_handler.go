@@ -14,7 +14,6 @@ import (
 	"netsecanalyzer/internal/analyzer"
 	"netsecanalyzer/internal/capture"
 	"netsecanalyzer/internal/database"
-	"netsecanalyzer/internal/export"
 	"netsecanalyzer/internal/models"
 	wsHub "netsecanalyzer/internal/websocket"
 	"netsecanalyzer/pkg/logger"
@@ -174,7 +173,6 @@ type CaptureHandler struct {
 	activeSessions map[uint]context.CancelFunc
 	payloadStorage *storage.PayloadStorage
 	wsHub          *wsHub.Hub
-	exporter       *export.Exporter
 	analyzer       *analyzer.Analyzer
 	mu             sync.Mutex
 }
@@ -191,16 +189,12 @@ func NewCaptureHandler() *CaptureHandler {
 	hub := wsHub.NewHub()
 	go hub.Run()
 
-	// 创建导出器
-	exporter := export.NewExporter("./data/exports")
-
 	// 创建协议分析器
 	protocolAnalyzer := analyzer.NewAnalyzer()
 
 	return &CaptureHandler{
 		activeSessions: make(map[uint]context.CancelFunc),
 		payloadStorage: payloadStorage,
-		exporter:       exporter,
 		wsHub:          hub,
 		analyzer:       protocolAnalyzer,
 	}
@@ -886,63 +880,6 @@ func (h *CaptureHandler) GetPayload(c *gin.Context) {
 	}
 
 	RespondNotFound(c, "Payload not found")
-}
-
-// ExportSession 导出会话数据
-func (h *CaptureHandler) ExportSession(c *gin.Context) {
-	sessionID := c.Param("id")
-	format := c.Query("format") // pcap, csv, json
-
-	if format == "" {
-		format = "pcap"
-	}
-
-	// 获取会话信息
-	var session models.CaptureSession
-	if err := database.GetDB().First(&session, sessionID).Error; err != nil {
-		RespondNotFound(c, "Session not found")
-		return
-	}
-
-	// 获取所有数据包
-	var packets []models.Packet
-	database.GetDB().Where("session_id = ?", sessionID).Find(&packets)
-
-	if len(packets) == 0 {
-		RespondNotFound(c, "No packets found")
-		return
-	}
-
-	// 转换为指针切片
-	packetPtrs := make([]*models.Packet, len(packets))
-	for i := range packets {
-		packetPtrs[i] = &packets[i]
-	}
-
-	var filepath string
-	var err error
-
-	// 根据格式导出
-	switch format {
-	case "pcap":
-		filepath, err = h.exporter.ExportSessionToPCAP(&session, packetPtrs)
-	case "csv":
-		filepath, err = h.exporter.ExportSessionToCSV(&session, packetPtrs)
-	case "json":
-		filepath, err = h.exporter.ExportSessionToJSON(&session, packetPtrs)
-	default:
-		RespondBadRequest(c, "Invalid format. Supported: pcap, csv, json")
-		return
-	}
-
-	if err != nil {
-		logger.GetLogger().Errorf("Failed to export session: %v", err)
-		RespondInternalError(c, "Export failed")
-		return
-	}
-
-	// 返回文件
-	c.FileAttachment(filepath, filepath[len("./data/exports/"):])
 }
 
 // DeleteSession 删除会话

@@ -255,16 +255,43 @@ func LoadFromPCAP(filename string, sessionID uint) ([]*models.Packet, error) {
 	return packets, nil
 }
 
+// NetworkInterface 网络接口信息
+type NetworkInterface struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 // GetAvailableInterfaces 获取可用的网络接口
-func GetAvailableInterfaces() ([]string, error) {
+func GetAvailableInterfaces() ([]NetworkInterface, error) {
 	devices, err := pcap.FindAllDevs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to find devices: %w", err)
 	}
 
-	var interfaces []string
+	var interfaces []NetworkInterface
 	for _, device := range devices {
-		interfaces = append(interfaces, device.Name)
+		description := device.Description
+		if description == "" {
+			description = "网络接口"
+		}
+		interfaces = append(interfaces, NetworkInterface{
+			Name:        device.Name,
+			Description: description,
+		})
 	}
 	return interfaces, nil
+}
+
+// GetAvailableInterfaceNames 获取可用的网络接口名称（兼容旧版本）
+func GetAvailableInterfaceNames() ([]string, error) {
+	interfaces, err := GetAvailableInterfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, iface := range interfaces {
+		names = append(names, iface.Name)
+	}
+	return names, nil
 }

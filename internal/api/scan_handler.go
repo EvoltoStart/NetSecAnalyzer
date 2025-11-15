@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"netsecanalyzer/internal/database"
-	"netsecanalyzer/internal/export"
 	"netsecanalyzer/internal/models"
 	"netsecanalyzer/internal/scanner"
 	"netsecanalyzer/pkg/logger"
@@ -17,15 +16,13 @@ import (
 
 // ScanHandler 扫描处理器
 type ScanHandler struct {
-	scanner  *scanner.Scanner
-	exporter *export.Exporter
+	scanner *scanner.Scanner
 }
 
 // NewScanHandler 创建扫描处理器
 func NewScanHandler(s *scanner.Scanner) *ScanHandler {
 	return &ScanHandler{
-		scanner:  s,
-		exporter: export.NewExporter("./data/exports"),
+		scanner: s,
 	}
 }
 
@@ -560,59 +557,4 @@ func (h *ScanHandler) DeleteTask(c *gin.Context) {
 	database.GetDB().Delete(&models.ScanTask{}, taskID)
 
 	RespondSuccess(c, gin.H{"message": "Task deleted"})
-}
-
-// ExportTaskResults 导出扫描结果
-func (h *ScanHandler) ExportTaskResults(c *gin.Context) {
-	taskID := c.Param("id")
-	format := c.Query("format") // csv, json
-
-	if format == "" {
-		format = "json"
-	}
-
-	// 获取任务信息
-	var task models.ScanTask
-	if err := database.GetDB().First(&task, taskID).Error; err != nil {
-		RespondNotFound(c, "Task not found")
-		return
-	}
-
-	// 获取扫描结果
-	var results []models.ScanResult
-	database.GetDB().Where("task_id = ?", taskID).Find(&results)
-
-	if len(results) == 0 {
-		RespondNotFound(c, "No results found")
-		return
-	}
-
-	// 转换为指针切片
-	resultPtrs := make([]*models.ScanResult, len(results))
-	for i := range results {
-		resultPtrs[i] = &results[i]
-	}
-
-	var filepath string
-	var err error
-
-	// 根据格式导出
-	switch format {
-	case "csv":
-		filepath, err = h.exporter.ExportScanResultToCSV(&task, resultPtrs)
-	case "json":
-		filepath, err = h.exporter.ExportScanResultToJSON(&task, resultPtrs)
-	default:
-		RespondBadRequest(c, "Invalid format. Supported: csv, json")
-		return
-	}
-
-	if err != nil {
-		logger.GetLogger().Errorf("Failed to export scan results: %v", err)
-		RespondInternalError(c, "Export failed")
-		return
-	}
-
-	// 返回文件
-	c.FileAttachment(filepath, filepath[len("./data/exports/"):])
 }

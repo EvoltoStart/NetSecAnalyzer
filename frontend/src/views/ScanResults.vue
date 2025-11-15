@@ -5,17 +5,6 @@
         <div class="card-header">
           <span>扫描结果 - 任务 #{{ taskId }}</span>
           <div>
-            <el-dropdown @command="handleExport" style="margin-right: 10px">
-              <el-button type="success">
-                <el-icon><Download /></el-icon> 导出
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="json">导出为 JSON</el-dropdown-item>
-                  <el-dropdown-item command="csv">导出为 CSV</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
             <el-button @click="goBack">
               <el-icon><ArrowLeft /></el-icon> 返回
             </el-button>
@@ -184,7 +173,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Download, ArrowLeft, Refresh, CircleCheck, Service, Warning, WarnTriangleFilled } from '@element-plus/icons-vue'
+import { ArrowLeft, Refresh, CircleCheck, Service, Warning, WarnTriangleFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 const route = useRoute()
@@ -244,40 +233,6 @@ const viewVulnDetail = (vuln) => {
   detailVisible.value = true
 }
 
-// 导出结果
-const handleExport = async (format) => {
-  try {
-    ElMessage.info(`正在导出为 ${format.toUpperCase()} 格式...`)
-    
-    const response = await axios.get(`/api/scan/tasks/${taskId.value}/export`, {
-      params: { format },
-      responseType: 'blob'
-    })
-    
-    const url = window.URL.createObjectURL(new Blob([response.data]))
-    const link = document.createElement('a')
-    link.href = url
-    
-    const contentDisposition = response.headers['content-disposition']
-    let filename = `scan_task_${taskId.value}.${format}`
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/)
-      if (filenameMatch) {
-        filename = filenameMatch[1]
-      }
-    }
-    
-    link.setAttribute('download', filename)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
-    
-    ElMessage.success('导出成功')
-  } catch (error) {
-    ElMessage.error('导出失败: ' + (error.response?.data?.error || error.message))
-  }
-}
 
 // 返回
 const goBack = () => {

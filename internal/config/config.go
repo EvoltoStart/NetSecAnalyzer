@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/spf13/viper"
 )
 
@@ -22,14 +23,15 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Host         string `mapstructure:"host"`
-	Port         int    `mapstructure:"port"`
-	User         string `mapstructure:"user"`
-	Password     string `mapstructure:"password"`
-	DBName       string `mapstructure:"dbname"`
-	Charset      string `mapstructure:"charset"`
-	MaxIdleConns int    `mapstructure:"max_idle_conns"`
-	MaxOpenConns int    `mapstructure:"max_open_conns"`
+	Type         string `mapstructure:"type"`           // 数据库类型: mysql, sqlite
+	Host         string `mapstructure:"host"`           // MySQL: 主机地址
+	Port         int    `mapstructure:"port"`           // MySQL: 端口
+	User         string `mapstructure:"user"`           // MySQL: 用户名
+	Password     string `mapstructure:"password"`       // MySQL: 密码
+	DBName       string `mapstructure:"dbname"`         // MySQL: 数据库名, SQLite: 文件路径
+	Charset      string `mapstructure:"charset"`        // MySQL: 字符集
+	MaxIdleConns int    `mapstructure:"max_idle_conns"` // 最大空闲连接数
+	MaxOpenConns int    `mapstructure:"max_open_conns"` // 最大打开连接数
 }
 
 type RedisConfig struct {

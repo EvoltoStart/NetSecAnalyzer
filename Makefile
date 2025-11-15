@@ -26,6 +26,35 @@ build:
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) cmd/server/main.go
 	@echo "Build complete: $(BUILD_DIR)/$(APP_NAME)"
 
+## build-embedded: 编译嵌入式版本 (SQLite)
+build-embedded:
+	@echo "Building $(APP_NAME) for embedded systems..."
+	@mkdir -p $(BUILD_DIR)
+	$(GOBUILD) $(LDFLAGS) -tags sqlite -o $(BUILD_DIR)/$(APP_NAME)-embedded cmd/server/main.go
+	@echo "Build complete: $(BUILD_DIR)/$(APP_NAME)-embedded"
+
+## build-arm: 编译 ARM 版本 (ARMv7)
+build-arm:
+	@echo "Building $(APP_NAME) for ARM (ARMv7)..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=1 \
+	CC=arm-linux-gnueabihf-gcc \
+	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME)-arm cmd/server/main.go
+	@echo "Build complete: $(BUILD_DIR)/$(APP_NAME)-arm"
+
+## build-arm64: 编译 ARM64 版本 (ARMv8)
+build-arm64:
+	@echo "Building $(APP_NAME) for ARM64 (ARMv8)..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 \
+	CC=aarch64-linux-gnu-gcc \
+	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME)-arm64 cmd/server/main.go
+	@echo "Build complete: $(BUILD_DIR)/$(APP_NAME)-arm64"
+
+## build-all: 编译所有平台版本
+build-all: build build-embedded build-arm build-arm64
+	@echo "All builds complete"
+
 ## run: 运行服务器
 run: build
 	@echo "Running $(APP_NAME)..."

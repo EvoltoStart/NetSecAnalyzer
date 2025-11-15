@@ -29,9 +29,9 @@
             <el-select v-model="captureForm.interface" placeholder="选择网络接口" filterable>
               <el-option
                 v-for="iface in interfaces"
-                :key="iface"
-                :label="iface"
-                :value="iface"
+                :key="iface.name"
+                :label="`${iface.name} - ${iface.description}`"
+                :value="iface.name"
               />
             </el-select>
           </el-form-item>
@@ -341,9 +341,9 @@ const loadInterfaces = async () => {
     // 自动选择第一个非特殊接口
     if (interfaces.value.length > 0) {
       const normalInterfaces = interfaces.value.filter(i =>
-        !['any', 'lo', 'bluetooth-monitor', 'nflog', 'nfqueue', 'dbus-system', 'dbus-session'].includes(i)
+        !['any', 'lo', 'bluetooth-monitor', 'nflog', 'nfqueue', 'dbus-system', 'dbus-session'].includes(i.name)
       )
-      captureForm.value.interface = normalInterfaces.length > 0 ? normalInterfaces[0] : interfaces.value[0]
+      captureForm.value.interface = normalInterfaces.length > 0 ? normalInterfaces[0].name : interfaces.value[0].name
     }
   } catch (error) {
     ElMessage.error('加载网络接口失败: ' + (error.response?.data?.error || error.message))

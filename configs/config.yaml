@@ -1,9 +1,24 @@
+# ============================================
+# NetSecAnalyzer 配置文件
+# ============================================
+# 支持两种模式：
+# 1. 标准模式（MySQL）- 适用于开发/生产服务器
+# 2. 嵌入式模式（SQLite）- 适用于 ARM 设备/边缘计算
+# 
+# 切换方法：注释/取消注释对应的配置块
+# ============================================
+
 server:
   host: "0.0.0.0"
   port: 8080
-  mode: "debug" # debug, release
+  mode: "debug"
+
+# ============================================
+# 数据库配置
+# ============================================
 
 database:
+  type: "mysql"
   host: "localhost"
   port: 3306
   user: "root"
@@ -19,28 +34,36 @@ redis:
   password: ""
   db: 0
 
+# ============================================
+# 数据采集配置
+# ============================================
+
 capture:
   ip:
-    default_interface: "auto"  # auto 表示自动选择第一个可用接口
+    default_interface: "auto"
     snaplen: 65536
     promisc: true
-    timeout: 3                 # 改为 3 秒
-    buffer_size: 50000         # 增加到 50000
+    timeout: 3
+    buffer_size: 50000
   can:
     default_interface: "can0"
-    bitrate: 500000            # 添加波特率配置
-    buffer_size: 5000          # 增加缓冲区
+    bitrate: 500000
+    buffer_size: 5000
   rs485:
     default_port: "/dev/ttyUSB0"
     baudrate: 9600
     databits: 8
     parity: "N"
     stopbits: 1
-    timeout: 1000              # 添加超时（毫秒）
+    timeout: 1000
   # 通用配置
-  max_file_size: 1073741824    # 1GB，单个 PCAP 文件最大大小
-  auto_rotate: true            # 自动轮转文件
-  save_path: "./captures"      # 保存路径
+  max_file_size: 1073741824    # 1GB
+  auto_rotate: true
+  save_path: "./captures"
+
+# ============================================
+# 扫描器配置
+# ============================================
 
 scanner:
   max_concurrent: 100
@@ -52,10 +75,77 @@ attack:
   max_rate: 100
 
 log:
-  level: "info" # debug, info, warn, error
+  level: "info"
   format: "json"
   output: "stdout"
   file_path: "./logs/app.log"
-  max_size: 100 # MB
+  max_size: 100                # MB
   max_backups: 5
-  max_age: 30 # days
+  max_age: 30                  # days
+
+# ============================================
+# 嵌入式模式配置（SQLite + 资源优化）
+# ============================================
+# 使用方法：
+# 1. 注释掉上面的 MySQL database 配置
+# 2. 取消注释下面的完整嵌入式配置
+# 3. 重启服务
+# ============================================
+
+# server:
+#   host: "0.0.0.0"
+#   port: 8080
+#   mode: "release"              # 生产模式，减少日志输出
+
+# database:
+#   type: "sqlite"
+#   dbname: "./data/netsecanalyzer.db"
+#   max_idle_conns: 2
+#   max_open_conns: 5
+
+# redis:
+#   host: "localhost"
+#   port: 6379
+#   password: ""
+#   db: 0
+
+# capture:
+#   ip:
+#     default_interface: "auto"
+#     snaplen: 1024              # 降低抓包长度，节省内存
+#     promisc: true
+#     timeout: 3
+#     buffer_size: 10000         # 降低缓冲区，节省内存
+#   can:
+#     default_interface: "can0"
+#     bitrate: 500000
+#     buffer_size: 1000          # 降低缓冲区
+#   rs485:
+#     default_port: "/dev/ttyUSB0"
+#     baudrate: 9600
+#     databits: 8
+#     parity: "N"
+#     stopbits: 1
+#     timeout: 1000
+#   # 通用配置
+#   max_file_size: 104857600     # 100MB，降低单文件大小
+#   auto_rotate: true
+#   save_path: "./data/captures" # 统一数据目录
+
+# scanner:
+#   max_concurrent: 10           # 降低并发数，减少 CPU 负载
+#   timeout: 3                   # 降低超时
+#   rate_limit: 100              # 降低速率限制
+
+# attack:
+#   authorization_required: true
+#   max_rate: 50                 # 降低攻击速率
+
+# log:
+#   level: "warn"                # 只记录警告和错误，减少日志量
+#   format: "json"
+#   output: "file"               # 输出到文件，避免终端输出
+#   file_path: "./data/logs/app.log"  # 统一数据目录
+#   max_size: 10                 # 降低日志文件大小 (MB)
+#   max_backups: 3               # 降低备份数量
+#   max_age: 7                   # 降低保留天数
