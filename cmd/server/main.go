@@ -9,7 +9,9 @@ import (
 	"netsecanalyzer/internal/api"
 	"netsecanalyzer/internal/config"
 	"netsecanalyzer/internal/database"
+	"netsecanalyzer/internal/tasks"
 	"netsecanalyzer/pkg/logger"
+	"netsecanalyzer/pkg/storage"
 	"os"
 	"os/signal"
 	"syscall"
@@ -62,6 +64,22 @@ func main() {
 	}
 	logger.GetLogger().Info("Database initialized successfully")
 
+	// 初始化 Payload 存储
+	payloadStorage, err := storage.NewPayloadStorage("./data/payloads", 100*1024*1024, 30)
+	if err != nil {
+		logger.GetLogger().Errorf("Failed to create payload storage: %v", err)
+	} else {
+		logger.GetLogger().Info("Payload storage initialized successfully")
+	}
+
+	// 启动清理任务
+	var cleanupTask *tasks.CleanupTask
+	if payloadStorage != nil {
+		cleanupTask = tasks.NewCleanupTask(payloadStorage, 30) // 30天保留期
+		cleanupTask.Start()
+		logger.GetLogger().Info("Cleanup task started (30 days retention)")
+	}
+
 	// 创建 API 路由器
 	router := api.NewRouter(cfg.Server.Mode)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -101,6 +119,12 @@ func main() {
 		logger.GetLogger().Errorf("Server forced to shutdown: %v", err)
 	} else {
 		logger.GetLogger().Info("Server shutdown gracefully")
+	}
+
+	// 停止清理任务
+	if cleanupTask != nil {
+		cleanupTask.Stop()
+		logger.GetLogger().Info("Cleanup task stopped")
 	}
 
 	// 关闭数据库连接
