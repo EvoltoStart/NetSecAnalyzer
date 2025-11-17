@@ -1,0 +1,62 @@
+service: OpenSSH
+rules:
+  - service_pattern: "SSH"
+    version_min: "0.0"
+    version_max: "7.7"
+    cve_id: "CVE-2018-15473"
+    cvss: 5.3
+    severity: "medium"
+    title: "OpenSSH User Enumeration Vulnerability"
+    description: "OpenSSH through 7.7 is prone to a user enumeration vulnerability due to not delaying bailout for an invalid authenticating user until after the packet containing the request has been fully parsed."
+    solution: "Upgrade to OpenSSH 7.8 or later"
+    affected_version: "OpenSSH <= 7.7"
+    enabled: true
+
+  - service_pattern: "SSH"
+    version_min: "0.0"
+    version_max: "7.3"
+    cve_id: "CVE-2016-10009"
+    cvss: 7.5
+    severity: "high"
+    title: "OpenSSH Privilege Escalation"
+    description: "Untrusted search path vulnerability in ssh-agent.c in ssh-agent in OpenSSH before 7.4 allows remote attackers to execute arbitrary local PKCS#11 modules by leveraging control over a forwarded agent-socket."
+    solution: "Upgrade to OpenSSH 7.4 or later"
+    affected_version: "OpenSSH < 7.4"
+    enabled: true
+
+  - service_pattern: "SSH"
+    version_min: "6.2"
+    version_max: "8.7"
+    cve_id: "CVE-2021-41617"
+    cvss: 7.0
+    severity: "high"
+    title: "OpenSSH Privilege Escalation"
+    description: "sshd in OpenSSH 6.2 through 8.x before 8.8 allows privilege escalation when AuthorizedKeysCommand or AuthorizedPrincipalsCommand are configured."
+    solution: "Upgrade to OpenSSH 8.8 or later"
+    affected_version: "OpenSSH 6.2 - 8.7"
+    enabled: true
+
+  - service_pattern: "SSH"
+    version_min: "7.9"
+    version_max: "7.9"
+    cve_id: "CVE-2018-20685"
+    cvss: 5.3
+    severity: "medium"
+    title: "OpenSSH Username Enumeration"
+    description: "In OpenSSH 7.9, scp.c in the scp client allows remote SSH servers to bypass intended access restrictions via the filename of . or an empty filename."
+    solution: "Upgrade to OpenSSH 8.0 or later"
+    affected_version: "OpenSSH 7.9"
+    enabled: true
+
+  - service_pattern: "SSH"
+    version_min: "0.0"
+    version_max: "5.6"
+    cve_id: "CVE-2010-4478"
+    cvss: 7.5
+    severity: "high"
+    title: "OpenSSH Legacy Certificate Signing"
+    description: "OpenSSH 5.6 and earlier allows remote attackers to cause a denial of service or possibly execute arbitrary code."
+    solution: "Upgrade to OpenSSH 5.7 or later"
+    affected_version: "OpenSSH <= 5.6"
+    enabled: true
+

@@ -8,7 +8,6 @@ import (
 	"netsecanalyzer/internal/scanner"
 	"netsecanalyzer/pkg/logger"
 	"netsecanalyzer/pkg/utils"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +16,16 @@ import (
 // ScanHandler 扫描处理器
 type ScanHandler struct {
 	scanner *scanner.Scanner
+}
+
+// ScanRequest 扫描请求结构
+type ScanRequest struct {
+	Name        string                 `json:"name"`
+	Target      string                 `json:"target" binding:"required"`
+	PortRange   string                 `json:"port_range"`
+	ScanType    string                 `json:"scan_type" binding:"required,oneof=port service vuln can rs485"`
+	NetworkType string                 `json:"network_type"` // ip, can, rs485
+	Config      map[string]interface{} `json:"config"`
 }
 
 // NewScanHandler 创建扫描处理器
@@ -28,13 +37,7 @@ func NewScanHandler(s *scanner.Scanner) *ScanHandler {
 
 // StartScan 启动扫描
 func (h *ScanHandler) StartScan(c *gin.Context) {
-	var req struct {
-		Target      string                 `json:"target" binding:"required"`
-		PortRange   string                 `json:"port_range"`
-		ScanType    string                 `json:"scan_type" binding:"required,oneof=port service vuln can rs485"`
-		NetworkType string                 `json:"network_type"` // ip, can, rs485
-		Config      map[string]interface{} `json:"config"`
-	}
+	var req ScanRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		RespondBadRequest(c, err.Error())
@@ -47,10 +50,16 @@ func (h *ScanHandler) StartScan(c *gin.Context) {
 		networkType = "ip" // 默认 IP 网络
 	}
 
+	// 确定任务名称：优先使用用户指定的名称，否则使用目标地址
+	taskName := req.Name
+	if taskName == "" {
+		taskName = req.Target
+	}
+
 	// 创建扫描任务
 	now := time.Now()
 	task := &models.ScanTask{
-		Name:        req.Target,
+		Name:        taskName,
 		Target:      req.Target,
 		ScanType:    req.ScanType,
 		Status:      "running",
@@ -84,13 +93,7 @@ func (h *ScanHandler) StartScan(c *gin.Context) {
 }
 
 // scanIPNetwork 扫描 IP 网络
-func (h *ScanHandler) scanIPNetwork(ctx context.Context, task *models.ScanTask, req struct {
-	Target      string                 `json:"target" binding:"required"`
-	PortRange   string                 `json:"port_range"`
-	ScanType    string                 `json:"scan_type" binding:"required,oneof=port service vuln can rs485"`
-	NetworkType string                 `json:"network_type"`
-	Config      map[string]interface{} `json:"config"`
-}) {
+func (h *ScanHandler) scanIPNetwork(ctx context.Context, task *models.ScanTask, req ScanRequest) {
 	// 解析端口范围
 	portRange := req.PortRange
 	if portRange == "" {
@@ -119,7 +122,7 @@ func (h *ScanHandler) scanIPNetwork(ctx context.Context, task *models.ScanTask, 
 
 	logger.GetLogger().Infof("Port scan completed for task %d: found %d open ports", task.ID, len(result.OpenPorts))
 
-	// 保存端口扫描结果（包含服务识别信息）
+	// 保存端口扫描结果
 	for _, port := range result.OpenPorts {
 		scanResult := &models.ScanResult{
 			TaskID:     task.ID,
@@ -142,12 +145,12 @@ func (h *ScanHandler) scanIPNetwork(ctx context.Context, task *models.ScanTask, 
 
 	logger.GetLogger().Infof("Saved %d scan results for task %d", len(result.OpenPorts), task.ID)
 
-	task.Progress = 60
+	task.Progress = 40
 	database.GetDB().Save(task)
 
-	// 执行基础漏洞检测（检查常见安全问题）
+	// 执行全面扫描：服务识别 + 漏洞检测
 	if len(result.OpenPorts) > 0 {
-		logger.GetLogger().Infof("Starting vulnerability detection for task %d", task.ID)
+		logger.GetLogger().Infof("Starting comprehensive security scan for task %d", task.ID)
 
 		// 将 PortInfo 转换为 ServiceInfo
 		var services []scanner.ServiceInfo
@@ -160,88 +163,93 @@ func (h *ScanHandler) scanIPNetwork(ctx context.Context, task *models.ScanTask, 
 			})
 		}
 
-		// 执行漏洞检测
-		vulns, err := h.scanner.DetectVulnerabilities(ctx, req.Target, services)
-		if err == nil && len(vulns) > 0 {
-			logger.GetLogger().Infof("Found %d vulnerabilities for task %d", len(vulns), task.ID)
-
-			// 保存漏洞检测结果
-			for _, vuln := range vulns {
-				// 从 Target 中提取端口号
-				port := 0
-				if strings.Contains(vuln.Target, ":") {
-					parts := strings.Split(vuln.Target, ":")
-					if len(parts) == 2 {
-						fmt.Sscanf(parts[1], "%d", &port)
-					}
-				}
-
-				scanResult := &models.ScanResult{
-					TaskID:      task.ID,
-					ResultType:  "vulnerability",
-					Target:      vuln.Target,
-					Port:        port,
-					Severity:    vuln.Severity,
-					Title:       vuln.Title,
-					Description: vuln.Description,
-					Solution:    vuln.Solution,
-					VulnType:    vuln.VulnType,
-					CVE:         vuln.CVEID,
-				}
-				if err := database.GetDB().Create(scanResult).Error; err != nil {
-					logger.GetLogger().Errorf("Failed to save vulnerability for task %d: %v", task.ID, err)
-				} else {
-					logger.GetLogger().Debugf("Saved vulnerability for task %d: %s", task.ID, vuln.Title)
-				}
-			}
-		}
-
-		task.Progress = 90
+		// 执行详细服务识别
+		task.Progress = 60
 		database.GetDB().Save(task)
-	}
 
-	// 如果需要深度服务识别（保留原有逻辑用于未来扩展）
-	if req.ScanType == "service" || req.ScanType == "vuln" {
 		openPorts := make([]int, len(result.OpenPorts))
 		for i, p := range result.OpenPorts {
 			openPorts[i] = p.Port
 		}
-		services, _ := h.scanner.ScanServices(ctx, req.Target, openPorts)
+		detailedServices, _ := h.scanner.ScanServices(ctx, req.Target, openPorts)
 
-		// 保存服务识别结果
-		for _, svc := range services {
-			scanResult := &models.ScanResult{
-				TaskID:     task.ID,
-				ResultType: "service",
-				Target:     req.Target,
-				Port:       svc.Port,
-				Service:    svc.Name,
-				Version:    svc.Version,
-				Banner:     svc.Banner,
+		// 更新已有的端口记录，而不是创建新的service记录
+		for _, svc := range detailedServices {
+			// 查找对应的端口记录并更新
+			var existingResult models.ScanResult
+			err := database.GetDB().Where("task_id = ? AND result_type = ? AND port = ?",
+				task.ID, "port", svc.Port).First(&existingResult).Error
+
+			if err == nil {
+				// 更新现有记录
+				existingResult.Service = svc.Name
+				existingResult.Version = svc.Version
+				existingResult.Banner = svc.Banner
+				database.GetDB().Save(&existingResult)
+			} else {
+				// 如果没有找到对应的端口记录，创建新的服务记录
+				scanResult := &models.ScanResult{
+					TaskID:     task.ID,
+					ResultType: "service",
+					Target:     req.Target,
+					Port:       svc.Port,
+					Service:    svc.Name,
+					Version:    svc.Version,
+					Banner:     svc.Banner,
+				}
+				database.GetDB().Create(scanResult)
 			}
-			database.GetDB().Create(scanResult)
 		}
 
-		task.Progress = 75
+		// 执行漏洞检测
+		task.Progress = 80
 		database.GetDB().Save(task)
 
-		// 如果需要漏洞检测
-		if req.ScanType == "vuln" {
-			vulns, _ := h.scanner.DetectVulnerabilities(ctx, req.Target, services)
+		vulns, err := h.scanner.DetectVulnerabilities(ctx, req.Target, services)
+		if err == nil && len(vulns) > 0 {
+			logger.GetLogger().Infof("Found %d vulnerabilities for task %d", len(vulns), task.ID)
+
+			// 漏洞去重：使用map记录已保存的漏洞
+			savedVulns := make(map[string]bool)
 
 			// 保存漏洞检测结果
 			for _, vuln := range vulns {
-				scanResult := &models.ScanResult{
-					TaskID:      task.ID,
-					ResultType:  "vulnerability",
-					Target:      vuln.Target,
-					Severity:    vuln.Severity,
-					Title:       vuln.Title,
-					Description: vuln.Description,
-					CVE:         vuln.CVEID,
-					VulnType:    vuln.VulnType,
+				// 使用漏洞对象中的 Port 字段（已在扫描器中设置）
+				port := vuln.Port
+
+				logger.GetLogger().Debugf("Processing vulnerability: %s, Target: %s, Port: %d", vuln.Title, vuln.Target, port)
+
+				// 创建漏洞唯一标识符（端口+标题+类型）
+				vulnKey := fmt.Sprintf("%d-%s-%s", port, vuln.Title, vuln.VulnType)
+
+				// 检查是否已经保存过相同的漏洞
+				if savedVulns[vulnKey] {
+					logger.GetLogger().Debugf("Skipping duplicate vulnerability: %s (port: %d)", vuln.Title, port)
+					continue
 				}
-				database.GetDB().Create(scanResult)
+
+				// 标记为已保存
+				savedVulns[vulnKey] = true
+
+				scanResult := &models.ScanResult{
+					TaskID:       task.ID,
+					ResultType:   "vulnerability",
+					Target:       vuln.Target,
+					Port:         port,
+					Severity:     vuln.Severity,
+					Title:        vuln.Title,
+					Description:  vuln.Description,
+					Solution:     vuln.Solution,
+					VulnType:     vuln.VulnType,
+					CVE:          vuln.CVEID,
+					CVSS:         vuln.CVSS,
+					DiscoveredAt: &vuln.DiscoveredAt,
+				}
+				if err := database.GetDB().Create(scanResult).Error; err != nil {
+					logger.GetLogger().Errorf("Failed to save vulnerability for task %d: %v", task.ID, err)
+				} else {
+					logger.GetLogger().Debugf("Saved vulnerability for task %d: %s (port: %d)", task.ID, vuln.Title, port)
+				}
 			}
 		}
 	}
@@ -257,13 +265,7 @@ func (h *ScanHandler) scanIPNetwork(ctx context.Context, task *models.ScanTask, 
 }
 
 // scanCANBus 扫描 CAN 总线
-func (h *ScanHandler) scanCANBus(ctx context.Context, task *models.ScanTask, req struct {
-	Target      string                 `json:"target" binding:"required"`
-	PortRange   string                 `json:"port_range"`
-	ScanType    string                 `json:"scan_type" binding:"required,oneof=port service vuln can rs485"`
-	NetworkType string                 `json:"network_type"`
-	Config      map[string]interface{} `json:"config"`
-}) {
+func (h *ScanHandler) scanCANBus(ctx context.Context, task *models.ScanTask, req ScanRequest) {
 	// 获取 CAN 接口
 	iface := "can0"
 	if val, ok := req.Config["interface"].(string); ok {
@@ -359,13 +361,7 @@ func (h *ScanHandler) scanCANBus(ctx context.Context, task *models.ScanTask, req
 }
 
 // scanRS485Bus 扫描 RS-485 总线
-func (h *ScanHandler) scanRS485Bus(ctx context.Context, task *models.ScanTask, req struct {
-	Target      string                 `json:"target" binding:"required"`
-	PortRange   string                 `json:"port_range"`
-	ScanType    string                 `json:"scan_type" binding:"required,oneof=port service vuln can rs485"`
-	NetworkType string                 `json:"network_type"`
-	Config      map[string]interface{} `json:"config"`
-}) {
+func (h *ScanHandler) scanRS485Bus(ctx context.Context, task *models.ScanTask, req ScanRequest) {
 	// 获取串口配置
 	port := "/dev/ttyUSB0"
 	if val, ok := req.Config["port"].(string); ok {

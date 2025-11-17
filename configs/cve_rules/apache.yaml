@@ -1,0 +1,74 @@
+service: Apache
+rules:
+  - service_pattern: "Apache"
+    version_min: "2.4.49"
+    version_max: "2.4.50"
+    cve_id: "CVE-2021-41773"
+    cvss: 7.5
+    severity: "high"
+    title: "Apache HTTP Server Path Traversal"
+    description: "A flaw was found in a change made to path normalization in Apache HTTP Server 2.4.49. An attacker could use a path traversal attack to map URLs to files outside the directories configured by Alias-like directives."
+    solution: "Upgrade to Apache 2.4.51 or later"
+    affected_version: "Apache 2.4.49, 2.4.50"
+    enabled: true
+
+  - service_pattern: "Apache"
+    version_min: "2.4.49"
+    version_max: "2.4.50"
+    cve_id: "CVE-2021-42013"
+    cvss: 9.8
+    severity: "critical"
+    title: "Apache HTTP Server Path Traversal and RCE"
+    description: "It was found that the fix for CVE-2021-41773 in Apache HTTP Server 2.4.50 was insufficient. An attacker could use a path traversal attack to map URLs to files outside the directories configured by Alias-like directives."
+    solution: "Upgrade to Apache 2.4.51 or later"
+    affected_version: "Apache 2.4.49, 2.4.50"
+    enabled: true
+
+  - service_pattern: "Apache"
+    version_min: "2.4.0"
+    version_max: "2.4.48"
+    cve_id: "CVE-2021-40438"
+    cvss: 9.0
+    severity: "critical"
+    title: "Apache HTTP Server SSRF"
+    description: "A crafted request uri-path can cause mod_proxy to forward the request to an origin server choosen by the remote user."
+    solution: "Upgrade to Apache 2.4.49 or later"
+    affected_version: "Apache 2.4.48 and earlier"
+    enabled: true
+
+  - service_pattern: "Apache"
+    version_min: "2.4.20"
+    version_max: "2.4.43"
+    cve_id: "CVE-2020-11993"
+    cvss: 7.5
+    severity: "high"
+    title: "Apache HTTP Server HTTP/2 Push Diary Crash"
+    description: "Apache HTTP Server versions 2.4.20 to 2.4.43 could crash with a specially crafted value for the 'Cache-Digest' header in a HTTP/2 request."
+    solution: "Upgrade to Apache 2.4.44 or later"
+    affected_version: "Apache 2.4.20 - 2.4.43"
+    enabled: true
+
+  - service_pattern: "Apache"
+    version_min: "2.4.20"
+    version_max: "2.4.43"
+    cve_id: "CVE-2020-9490"
+    cvss: 7.5
+    severity: "high"
+    title: "Apache HTTP Server HTTP/2 Cache-Digest Crash"
+    description: "Apache HTTP Server versions 2.4.20 to 2.4.43 could crash with a specially crafted value for the 'Cache-Digest' header in a HTTP/2 request."
+    solution: "Upgrade to Apache 2.4.44 or later"
+    affected_version: "Apache 2.4.20 - 2.4.43"
+    enabled: true
+
+  - service_pattern: "Apache"
+    version_min: "2.4.0"
+    version_max: "2.4.39"
+    cve_id: "CVE-2019-10098"
+    cvss: 5.3
+    severity: "medium"
+    title: "Apache HTTP Server Rewrite Rules Redirect"
+    description: "In Apache HTTP Server 2.4.0-2.4.39, a malicious user with the ability to modify the HTTP request could redirect the request to a URL of their choice."
+    solution: "Upgrade to Apache 2.4.40 or later"
+    affected_version: "Apache 2.4.0 - 2.4.39"
+    enabled: true
+

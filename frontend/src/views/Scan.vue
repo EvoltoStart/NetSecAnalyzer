@@ -41,12 +41,26 @@
             />
           </el-form-item>
 
-          <el-form-item label="扫描类型" prop="scanType">
-            <el-radio-group v-model="scanForm.scanType">
-              <el-radio label="port">端口扫描</el-radio>
-              <el-radio label="service">服务识别</el-radio>
-              <el-radio label="vuln">漏洞检测</el-radio>
-            </el-radio-group>
+          <el-form-item label="扫描说明">
+            <el-alert
+              title="全面安全扫描"
+              type="info"
+              :closable="false"
+              show-icon
+            >
+              <template #default>
+                <div class="scan-description">
+                  <p><strong>扫描内容：</strong>端口检测 → 服务识别 → 漏洞检测</p>
+                  <p><strong>预计时间：</strong>3-5分钟（取决于目标响应速度和开放端口数量）</p>
+                  <p><strong>扫描步骤：</strong></p>
+                  <ul>
+                    <li>🔍 检测指定端口范围内的开放端口</li>
+                    <li>🔧 识别开放端口上运行的服务和版本</li>
+                    <li>🛡️ 检测已知安全漏洞和配置问题</li>
+                  </ul>
+                </div>
+              </template>
+            </el-alert>
           </el-form-item>
         </template>
 
@@ -168,7 +182,7 @@ const scanForm = ref({
   networkType: 'ip',
   target: '',
   portRange: '1-1024',
-  scanType: 'port',
+  scanType: 'vuln', // 默认全面扫描
   // CAN 配置
   canInterface: 'can0',
   canDuration: 30,
@@ -197,7 +211,7 @@ const onNetworkTypeChange = (type) => {
     scanForm.value.scanType = 'rs485'
     scanForm.value.target = scanForm.value.rs485Port
   } else {
-    scanForm.value.scanType = 'port'
+    scanForm.value.scanType = 'vuln' // IP网络默认全面扫描
   }
 }
 
@@ -249,6 +263,7 @@ const startScan = async () => {
     const loadingMsg = ElMessage.info('正在启动扫描...')
 
     const payload = {
+      name: scanForm.value.name.trim() || undefined, // 添加任务名称字段
       target: scanForm.value.target.trim(),
       scan_type: scanForm.value.scanType,
       network_type: scanForm.value.networkType,
@@ -277,8 +292,12 @@ const startScan = async () => {
     console.log('扫描响应:', response.data)
 
     loadingMsg.close()
+
+    // 标准响应格式: {success: true, data: {taskId: 123, message: "..."}}
+    const taskId = response.data.data?.taskId || response.data.taskId
+
     ElMessage.success({
-      message: `扫描已启动！任务 ID: ${response.data.taskId}`,
+      message: `扫描已启动！任务 ID: ${taskId}`,
       duration: 3000
     })
 
@@ -380,5 +399,25 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+
+/* 扫描说明样式 */
+.scan-description {
+  line-height: 1.6;
+}
+
+.scan-description p {
+  margin: 8px 0;
+}
+
+.scan-description ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.scan-description li {
+  margin: 4px 0;
+  color: #606266;
 }
 </style>

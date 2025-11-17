@@ -1,0 +1,121 @@
+service: Network Services
+rules:
+  # SMB/NetBIOS CVEs
+  # 注意：EternalBlue 只影响 Windows SMB，不影响 Linux Samba
+  # 需要通过 Banner 或其他方式确认是 Windows SMB 才报告此漏洞
+  - service_pattern: "SMB"
+    version_pattern: "Windows"  # 只匹配 Windows SMB
+    cve_id: "CVE-2017-0144"
+    cvss: 9.3
+    severity: "critical"
+    title: "EternalBlue - SMB Remote Code Execution"
+    description: "The SMBv1 server in Microsoft Windows allows remote attackers to execute arbitrary code via crafted packets (EternalBlue exploit). This vulnerability only affects Windows SMB, not Samba."
+    solution: "Apply MS17-010 security update and disable SMBv1"
+    affected_version: "Windows 7, Server 2008 R2, Server 2008, Vista, Server 2003, XP"
+    enabled: true
+
+  - service_pattern: "NetBIOS"
+    version_pattern: "Windows"  # 只匹配 Windows NetBIOS
+    cve_id: "CVE-2017-0144"
+    cvss: 9.3
+    severity: "critical"
+    title: "EternalBlue - SMB Remote Code Execution"
+    description: "The SMBv1 server in Microsoft Windows allows remote attackers to execute arbitrary code via crafted packets (EternalBlue exploit). This vulnerability only affects Windows SMB, not Samba."
+    solution: "Apply MS17-010 security update and disable SMBv1"
+    affected_version: "Windows 7, Server 2008 R2, Server 2008, Vista, Server 2003, XP"
+    enabled: true
+
+  # FTP CVEs
+  - service_pattern: "FTP"
+    version_pattern: "vsftpd 2.3.4"
+    cve_id: "CVE-2011-2523"
+    cvss: 10.0
+    severity: "critical"
+    title: "vsftpd 2.3.4 Backdoor"
+    description: "vsftpd 2.3.4 downloaded between 20110630 and 20110703 contains a backdoor which opens a shell on port 6200/tcp."
+    solution: "Upgrade to vsftpd 2.3.5 or later from official sources"
+    affected_version: "vsftpd 2.3.4 (compromised version)"
+    enabled: true
+
+  - service_pattern: "FTP"
+    version_pattern: "ProFTPD 1.3.3"
+    cve_id: "CVE-2010-4221"
+    cvss: 10.0
+    severity: "critical"
+    title: "ProFTPD Buffer Overflow"
+    description: "Multiple stack-based buffer overflows in the pr_netio_telnet_gets function in ProFTPD before 1.3.3c allow remote attackers to execute arbitrary code."
+    solution: "Upgrade to ProFTPD 1.3.3c or later"
+    affected_version: "ProFTPD < 1.3.3c"
+    enabled: true
+
+  # Telnet CVE
+  - service_pattern: "Telnet"
+    version_pattern: ""
+    cve_id: "CWE-319"
+    cvss: 7.5
+    severity: "high"
+    title: "Telnet Cleartext Transmission"
+    description: "Telnet transmits data in cleartext, including passwords, making it vulnerable to eavesdropping."
+    solution: "Replace Telnet with SSH for secure remote access"
+    affected_version: "All Telnet implementations"
+    enabled: true
+
+  # SMTP CVE
+  - service_pattern: "SMTP"
+    version_pattern: "Exim 4.9"
+    cve_id: "CVE-2019-10149"
+    cvss: 9.8
+    severity: "critical"
+    title: "Exim Remote Command Execution"
+    description: "A flaw was found in Exim versions 4.87 to 4.91. Improper validation of recipient address in deliver_message() function could allow remote attackers to execute arbitrary commands."
+    solution: "Upgrade to Exim 4.92 or later"
+    affected_version: "Exim 4.87 - 4.91"
+    enabled: true
+
+  # DNS CVE
+  - service_pattern: "DNS"
+    version_pattern: "BIND 9.11"
+    cve_id: "CVE-2020-8625"
+    cvss: 8.1
+    severity: "high"
+    title: "BIND SPNEGO Implementation Vulnerability"
+    description: "BIND servers are vulnerable if they are running an affected version and are configured to use GSS-TSIG features."
+    solution: "Upgrade to BIND 9.11.27 or later"
+    affected_version: "BIND 9.11.0 - 9.11.26"
+    enabled: true
+
+  # RDP CVEs
+  - service_pattern: "RDP"
+    version_pattern: ""
+    cve_id: "CVE-2019-0708"
+    cvss: 9.8
+    severity: "critical"
+    title: "BlueKeep - RDP Remote Code Execution"
+    description: "A remote code execution vulnerability exists in Remote Desktop Services when an unauthenticated attacker connects to the target system using RDP."
+    solution: "Apply Microsoft security updates and enable Network Level Authentication"
+    affected_version: "Windows 7, Server 2008 R2, Server 2008, XP, Server 2003"
+    enabled: true
+
+  - service_pattern: "RDP"
+    version_pattern: ""
+    cve_id: "CVE-2019-1181"
+    cvss: 8.1
+    severity: "high"
+    title: "RDP Remote Code Execution"
+    description: "A remote code execution vulnerability exists in Remote Desktop Services when an authenticated attacker abuses clipboard redirection."
+    solution: "Apply Microsoft security updates"
+    affected_version: "Windows 10, Server 2019, Server 2016"
+    enabled: true
+
+  # Modbus CVE
+  - service_pattern: "Modbus"
+    version_pattern: ""
+    cve_id: "CWE-306"
+    cvss: 9.8
+    severity: "critical"
+    title: "Modbus No Authentication"
+    description: "Modbus protocol does not provide authentication, allowing unauthorized access to industrial control systems."
+    solution: "Implement network segmentation and use Modbus/TCP with VPN or firewall rules"
+    affected_version: "All Modbus implementations"
+    enabled: true
+

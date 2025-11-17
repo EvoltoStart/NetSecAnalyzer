@@ -42,9 +42,11 @@ type Packet struct {
 type Vulnerability struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
 	Target       string    `gorm:"size:255;not null;index" json:"target"`
+	Port         int       `json:"port,omitempty"` // 端口号
 	VulnType     string    `gorm:"size:100;not null" json:"vulnType"`
 	Severity     string    `gorm:"size:50;not null;index" json:"severity"` // critical, high, medium, low, info
 	CVEID        string    `gorm:"size:50;index" json:"cveId,omitempty"`
+	CVSS         float64   `json:"cvss,omitempty"` // CVSS 评分
 	Title        string    `gorm:"size:500" json:"title"`
 	Description  string    `gorm:"type:text" json:"description"`
 	Solution     string    `gorm:"type:text" json:"solution,omitempty"`
@@ -131,26 +133,27 @@ type ProtocolStat struct {
 
 // ScanResult 扫描结果
 type ScanResult struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	TaskID      uint      `gorm:"not null;index" json:"taskId"`
-	ResultType  string    `gorm:"size:50;not null;index" json:"resultType"` // port, service, vulnerability, can_id, modbus_device, topology
-	Target      string    `gorm:"size:500" json:"target,omitempty"`         // 目标（IP/接口/端口）
-	Port        int       `json:"port,omitempty"`
-	Protocol    string    `gorm:"size:20" json:"protocol,omitempty"`
-	State       string    `gorm:"size:20" json:"state,omitempty"`
-	Service     string    `gorm:"size:100" json:"service,omitempty"`
-	Version     string    `gorm:"size:255" json:"version,omitempty"`
-	Banner      string    `gorm:"type:text" json:"banner,omitempty"`
-	VulnType    string    `gorm:"size:100" json:"vulnType,omitempty"`
-	Severity    string    `gorm:"size:20;index" json:"severity,omitempty"`
-	Title       string    `gorm:"size:255" json:"title,omitempty"`
-	Description string    `gorm:"type:text" json:"description,omitempty"`
-	Solution    string    `gorm:"type:text" json:"solution,omitempty"`
-	CVE         string    `gorm:"size:50" json:"cve,omitempty"`
-	CVSS        float64   `json:"cvss,omitempty"`
-	Details     JSON      `gorm:"type:text" json:"details,omitempty"`   // SQLite 兼容: json → text
-	ExtraData   JSON      `gorm:"type:text" json:"extraData,omitempty"` // SQLite 兼容: json → text
-	CreatedAt   time.Time `json:"createdAt"`
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	TaskID       uint       `gorm:"not null;index" json:"taskId"`
+	ResultType   string     `gorm:"size:50;not null;index" json:"resultType"` // port, service, vulnerability, can_id, modbus_device, topology
+	Target       string     `gorm:"size:500" json:"target,omitempty"`         // 目标（IP/接口/端口）
+	Port         int        `json:"port,omitempty"`
+	Protocol     string     `gorm:"size:20" json:"protocol,omitempty"`
+	State        string     `gorm:"size:20" json:"state,omitempty"`
+	Service      string     `gorm:"size:100" json:"service,omitempty"`
+	Version      string     `gorm:"size:255" json:"version,omitempty"`
+	Banner       string     `gorm:"type:text" json:"banner,omitempty"`
+	VulnType     string     `gorm:"size:100" json:"vulnType,omitempty"`
+	Severity     string     `gorm:"size:20;index" json:"severity,omitempty"`
+	Title        string     `gorm:"size:255" json:"title,omitempty"`
+	Description  string     `gorm:"type:text" json:"description,omitempty"`
+	Solution     string     `gorm:"type:text" json:"solution,omitempty"`
+	CVE          string     `gorm:"size:50" json:"cve,omitempty"`
+	CVSS         float64    `json:"cvss,omitempty"`
+	Details      JSON       `gorm:"type:text" json:"details,omitempty"`   // SQLite 兼容: json → text
+	ExtraData    JSON       `gorm:"type:text" json:"extraData,omitempty"` // SQLite 兼容: json → text
+	DiscoveredAt *time.Time `json:"discoveredAt,omitempty"`               // 漏洞发现时间
+	CreatedAt    time.Time  `json:"createdAt"`
 }
 
 // JSON 自定义 JSON 类型

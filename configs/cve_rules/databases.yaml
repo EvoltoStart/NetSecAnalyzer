@@ -1,0 +1,140 @@
+service: Databases
+rules:
+  # Redis CVEs
+  - service_pattern: "Redis"
+    version_pattern: "Redis"
+    cve_id: "CVE-2021-32675"
+    cvss: 7.5
+    severity: "high"
+    title: "Redis Denial of Service"
+    description: "Redis is an open source, in-memory database. When parsing an incoming Redis Standard Protocol (RESP) request, Redis allocates memory according to user-specified values which determine the number of elements and size of individual elements."
+    solution: "Upgrade to Redis 6.2.5, 6.0.15, or 5.0.13"
+    affected_version: "Redis < 6.2.5, < 6.0.15, < 5.0.13"
+    enabled: true
+
+  - service_pattern: "Redis"
+    version_pattern: "Redis"
+    cve_id: "CVE-2021-32626"
+    cvss: 8.8
+    severity: "high"
+    title: "Redis Lua Debugger Integer Overflow"
+    description: "Redis is an open source, in-memory database. An integer overflow bug in the ziplist data structure used by all versions of Redis can be exploited to corrupt the heap and potentially result in remote code execution."
+    solution: "Upgrade to Redis 6.2.5, 6.0.15, or 5.0.13"
+    affected_version: "Redis < 6.2.5, < 6.0.15, < 5.0.13"
+    enabled: true
+
+  - service_pattern: "Redis"
+    version_pattern: ""
+    cve_id: "CWE-306"
+    cvss: 9.8
+    severity: "critical"
+    title: "Redis No Authentication"
+    description: "Redis server is accessible without authentication, allowing unauthorized access to data."
+    solution: "Configure Redis with requirepass and bind to localhost only"
+    affected_version: "All versions with default configuration"
+    enabled: true
+
+  # MySQL CVEs
+  - service_pattern: "MySQL"
+    version_pattern: "MySQL"
+    cve_id: "CVE-2020-14765"
+    cvss: 4.9
+    severity: "medium"
+    title: "MySQL Server FTS Component Vulnerability"
+    description: "Vulnerability in the MySQL Server product of Oracle MySQL (component: Server: FTS). Easily exploitable vulnerability allows high privileged attacker with network access to compromise MySQL Server."
+    solution: "Upgrade to MySQL 8.0.22, 5.7.32 or later"
+    affected_version: "MySQL 8.0.21 and prior, 5.7.31 and prior"
+    enabled: true
+
+  - service_pattern: "MySQL"
+    version_pattern: "MySQL"
+    cve_id: "CVE-2021-2307"
+    cvss: 4.9
+    severity: "medium"
+    title: "MySQL Server Packaging Vulnerability"
+    description: "Vulnerability in the MySQL Server product of Oracle MySQL (component: Server: Packaging). Difficult to exploit vulnerability allows high privileged attacker with network access to compromise MySQL Server."
+    solution: "Upgrade to MySQL 8.0.24, 5.7.34 or later"
+    affected_version: "MySQL 8.0.23 and prior, 5.7.33 and prior"
+    enabled: true
+
+  - service_pattern: "MySQL"
+    version_pattern: ""
+    cve_id: "CWE-306"
+    cvss: 9.8
+    severity: "critical"
+    title: "MySQL No Authentication"
+    description: "MySQL server allows connections without authentication or with default credentials."
+    solution: "Set strong passwords for all MySQL users and disable anonymous accounts"
+    affected_version: "All versions with weak configuration"
+    enabled: true
+
+  # PostgreSQL CVEs
+  - service_pattern: "PostgreSQL"
+    version_pattern: "PostgreSQL"
+    cve_id: "CVE-2021-32027"
+    cvss: 8.8
+    severity: "high"
+    title: "PostgreSQL Buffer Overflow"
+    description: "A flaw was found in postgresql. While modifying certain SQL array values, missing bounds checks let authenticated database users write arbitrary bytes to a wide area of server memory."
+    solution: "Upgrade to PostgreSQL 13.3, 12.7, 11.12, 10.17, 9.6.22"
+    affected_version: "PostgreSQL < 13.3, < 12.7, < 11.12, < 10.17, < 9.6.22"
+    enabled: true
+
+  - service_pattern: "PostgreSQL"
+    version_pattern: "PostgreSQL"
+    cve_id: "CVE-2020-25695"
+    cvss: 8.8
+    severity: "high"
+    title: "PostgreSQL Permission Check Bypass"
+    description: "A flaw was found in PostgreSQL. An attacker having permission to create non-temporary objects in at least one schema can execute arbitrary SQL functions under the identity of a superuser."
+    solution: "Upgrade to PostgreSQL 13.1, 12.5, 11.10, 10.15, 9.6.20, 9.5.24"
+    affected_version: "PostgreSQL < 13.1, < 12.5, < 11.10, < 10.15, < 9.6.20"
+    enabled: true
+
+  # MongoDB CVEs
+  - service_pattern: "MongoDB"
+    version_pattern: "MongoDB"
+    cve_id: "CVE-2019-2386"
+    cvss: 9.8
+    severity: "critical"
+    title: "MongoDB Server-Side JavaScript Execution"
+    description: "Incorrect parsing of certain JSON input may result in js function in MongoDB Server to execute arbitrary code."
+    solution: "Upgrade to MongoDB 4.0.6, 3.6.11, 3.4.19"
+    affected_version: "MongoDB < 4.0.6, < 3.6.11, < 3.4.19"
+    enabled: true
+
+  - service_pattern: "MongoDB"
+    version_pattern: ""
+    cve_id: "CWE-306"
+    cvss: 9.8
+    severity: "critical"
+    title: "MongoDB No Authentication"
+    description: "MongoDB server is accessible without authentication, allowing unauthorized access to databases."
+    solution: "Enable authentication and create user accounts with appropriate privileges"
+    affected_version: "All versions with default configuration"
+    enabled: true
+
+  # Elasticsearch CVE
+  - service_pattern: "Elasticsearch"
+    version_pattern: "Elasticsearch"
+    cve_id: "CVE-2020-7009"
+    cvss: 6.5
+    severity: "medium"
+    title: "Elasticsearch Information Disclosure"
+    description: "Elasticsearch versions before 7.6.0 and 6.8.7 contain an information disclosure flaw in the async search API."
+    solution: "Upgrade to Elasticsearch 7.6.0, 6.8.7 or later"
+    affected_version: "Elasticsearch < 7.6.0, < 6.8.7"
+    enabled: true
+
+  # Memcached CVE
+  - service_pattern: "Memcached"
+    version_pattern: "Memcached"
+    cve_id: "CVE-2018-1000115"
+    cvss: 9.8
+    severity: "critical"
+    title: "Memcached UDP Reflection Attack"
+    description: "Memcached version 1.5.5 and earlier contains a UDP reflection vulnerability that can be exploited for DDoS attacks."
+    solution: "Upgrade to Memcached 1.5.6 or later, disable UDP support"
+    affected_version: "Memcached <= 1.5.5"
+    enabled: true
+
