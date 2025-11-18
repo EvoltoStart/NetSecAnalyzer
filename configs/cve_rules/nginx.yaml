@@ -1,7 +1,7 @@
 service: Nginx
 rules:
   - service_pattern: "nginx"
-    version_min: "0.0"
+    version_min: "1.9.5"
     version_max: "1.17.2"
     cve_id: "CVE-2019-9511"
     cvss: 7.5
@@ -9,11 +9,11 @@ rules:
     title: "Nginx HTTP/2 Denial of Service"
     description: "Some HTTP/2 implementations are vulnerable to window size manipulation and stream prioritization manipulation, potentially leading to a denial of service."
     solution: "Upgrade to nginx 1.17.3 or later"
-    affected_version: "nginx < 1.17.3"
+    affected_version: "nginx 1.9.5 - 1.17.2 (with HTTP/2)"
     enabled: true
 
   - service_pattern: "nginx"
-    version_min: "0.0"
+    version_min: "1.9.5"
     version_max: "1.17.2"
     cve_id: "CVE-2019-9513"
     cvss: 7.5
@@ -21,7 +21,7 @@ rules:
     title: "Nginx HTTP/2 Resource Loop"
     description: "Some HTTP/2 implementations are vulnerable to resource loops, potentially leading to a denial of service."
     solution: "Upgrade to nginx 1.17.3 or later"
-    affected_version: "nginx < 1.17.3"
+    affected_version: "nginx 1.9.5 - 1.17.2 (with HTTP/2)"
     enabled: true
 
   - service_pattern: "nginx"
@@ -37,7 +37,7 @@ rules:
     enabled: true
 
   - service_pattern: "nginx"
-    version_min: "0.0"
+    version_min: "1.9.5"
     version_max: "1.15.5"
     cve_id: "CVE-2018-16843"
     cvss: 7.5
@@ -45,6 +45,6 @@ rules:
     title: "Nginx HTTP/2 Memory Disclosure"
     description: "nginx before versions 1.15.6 and 1.14.1 has a vulnerability in the implementation of HTTP/2 that can allow for excessive memory consumption."
     solution: "Upgrade to nginx 1.15.6, 1.14.1 or later"
-    affected_version: "nginx < 1.15.6"
+    affected_version: "nginx 1.9.5 - 1.15.5 (with HTTP/2)"
     enabled: true
 

@@ -2,7 +2,8 @@ service: Databases
 rules:
   # Redis CVEs
   - service_pattern: "Redis"
-    version_pattern: "Redis"
+    version_min: "2.0.0"
+    version_max: "6.2.4"
     cve_id: "CVE-2021-32675"
     cvss: 7.5
     severity: "high"
@@ -13,7 +14,8 @@ rules:
     enabled: true
 
   - service_pattern: "Redis"
-    version_pattern: "Redis"
+    version_min: "2.0.0"
+    version_max: "6.2.4"
     cve_id: "CVE-2021-32626"
     cvss: 8.8
     severity: "high"
@@ -23,6 +25,7 @@ rules:
     affected_version: "Redis < 6.2.5, < 6.0.15, < 5.0.13"
     enabled: true
 
+  # 禁用"无认证"检测 - 这不是真正的CVE漏洞，而是配置建议
   - service_pattern: "Redis"
     version_pattern: ""
     cve_id: "CWE-306"
@@ -32,11 +35,12 @@ rules:
     description: "Redis server is accessible without authentication, allowing unauthorized access to data."
     solution: "Configure Redis with requirepass and bind to localhost only"
     affected_version: "All versions with default configuration"
-    enabled: true
+    enabled: false
 
   # MySQL CVEs
   - service_pattern: "MySQL"
-    version_pattern: "MySQL"
+    version_min: "5.7.0"
+    version_max: "8.0.21"
     cve_id: "CVE-2020-14765"
     cvss: 4.9
     severity: "medium"
@@ -47,7 +51,8 @@ rules:
     enabled: true
 
   - service_pattern: "MySQL"
-    version_pattern: "MySQL"
+    version_min: "5.7.0"
+    version_max: "8.0.23"
     cve_id: "CVE-2021-2307"
     cvss: 4.9
     severity: "medium"
@@ -57,6 +62,7 @@ rules:
     affected_version: "MySQL 8.0.23 and prior, 5.7.33 and prior"
     enabled: true
 
+  # 禁用"无认证"检测 - 这不是真正的CVE漏洞
   - service_pattern: "MySQL"
     version_pattern: ""
     cve_id: "CWE-306"
@@ -66,11 +72,12 @@ rules:
     description: "MySQL server allows connections without authentication or with default credentials."
     solution: "Set strong passwords for all MySQL users and disable anonymous accounts"
     affected_version: "All versions with weak configuration"
-    enabled: true
+    enabled: false
 
   # PostgreSQL CVEs
   - service_pattern: "PostgreSQL"
-    version_pattern: "PostgreSQL"
+    version_min: "9.6.0"
+    version_max: "13.2"
     cve_id: "CVE-2021-32027"
     cvss: 8.8
     severity: "high"
@@ -81,7 +88,8 @@ rules:
     enabled: true
 
   - service_pattern: "PostgreSQL"
-    version_pattern: "PostgreSQL"
+    version_min: "9.5.0"
+    version_max: "13.0"
     cve_id: "CVE-2020-25695"
     cvss: 8.8
     severity: "high"
@@ -93,7 +101,8 @@ rules:
 
   # MongoDB CVEs
   - service_pattern: "MongoDB"
-    version_pattern: "MongoDB"
+    version_min: "3.4.0"
+    version_max: "4.0.5"
     cve_id: "CVE-2019-2386"
     cvss: 9.8
     severity: "critical"
@@ -103,6 +112,7 @@ rules:
     affected_version: "MongoDB < 4.0.6, < 3.6.11, < 3.4.19"
     enabled: true
 
+  # 禁用"无认证"检测 - 这不是真正的CVE漏洞
   - service_pattern: "MongoDB"
     version_pattern: ""
     cve_id: "CWE-306"
@@ -112,11 +122,12 @@ rules:
     description: "MongoDB server is accessible without authentication, allowing unauthorized access to databases."
     solution: "Enable authentication and create user accounts with appropriate privileges"
     affected_version: "All versions with default configuration"
-    enabled: true
+    enabled: false
 
   # Elasticsearch CVE
   - service_pattern: "Elasticsearch"
-    version_pattern: "Elasticsearch"
+    version_min: "6.0.0"
+    version_max: "7.5.9"
     cve_id: "CVE-2020-7009"
     cvss: 6.5
     severity: "medium"
@@ -128,7 +139,8 @@ rules:
 
   # Memcached CVE
   - service_pattern: "Memcached"
-    version_pattern: "Memcached"
+    version_min: "1.0.0"
+    version_max: "1.5.5"
     cve_id: "CVE-2018-1000115"
     cvss: 9.8
     severity: "critical"
