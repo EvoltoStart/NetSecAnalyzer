@@ -31,7 +31,8 @@ type Packet struct {
 	SrcPort        int       `json:"srcPort,omitempty"`
 	DstPort        int       `json:"dstPort,omitempty"`
 	Length         int       `json:"length"`
-	Payload        []byte    `gorm:"type:blob" json:"payload,omitempty"`
+	Payload        []byte    `gorm:"type:blob" json:"payload,omitempty"`         // 应用层数据
+	RawData        []byte    `gorm:"type:blob" json:"rawData,omitempty"`         // 完整的原始数据包（用于重放）
 	PayloadPath    string    `gorm:"size:500" json:"payloadPath,omitempty"`      // Payload 文件路径
 	PayloadHash    string    `gorm:"size:64;index" json:"payloadHash,omitempty"` // Payload SHA256 哈希
 	AnalysisResult JSON      `gorm:"type:text" json:"analysisResult,omitempty"`  // SQLite 兼容: json → text

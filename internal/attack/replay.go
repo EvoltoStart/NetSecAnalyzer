@@ -24,10 +24,16 @@ func NewReplayer(manager *AttackManager) *Replayer {
 	}
 }
 
+// ReplayResult 重放结果
+type ReplayResult struct {
+	SentCount   int
+	FailedCount int
+}
+
 // ReplayPackets 重放数据包
-func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, iface string, speedMultiplier float64) error {
+func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, iface string, speedMultiplier float64) (*ReplayResult, error) {
 	if len(packets) == 0 {
-		return fmt.Errorf("no packets to replay")
+		return nil, fmt.Errorf("no packets to replay")
 	}
 
 	logger.GetLogger().Infof("Starting packet replay: %d packets on interface %s", len(packets), iface)
@@ -35,18 +41,22 @@ func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, 
 	// 打开网络接口进行发送
 	handle, err := pcap.OpenLive(iface, 65536, true, pcap.BlockForever)
 	if err != nil {
-		return fmt.Errorf("failed to open interface: %w", err)
+		return nil, fmt.Errorf("failed to open interface: %w", err)
 	}
 	defer handle.Close()
 
 	startTime := packets[0].Timestamp
 	replayStartTime := time.Now()
+	result := &ReplayResult{
+		SentCount:   0,
+		FailedCount: 0,
+	}
 
 	for i, pkt := range packets {
 		select {
 		case <-ctx.Done():
-			logger.GetLogger().Info("Packet replay stopped by context")
-			return ctx.Err()
+			logger.GetLogger().Infof("Packet replay stopped by context (sent: %d, failed: %d)", result.SentCount, result.FailedCount)
+			return result, ctx.Err()
 		default:
 			// 计算延迟
 			if i > 0 {
@@ -60,18 +70,32 @@ func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, 
 				}
 			}
 
-			// 发送数据包
-			if err := handle.WritePacketData(pkt.Payload); err != nil {
-				logger.GetLogger().Errorf("Failed to send packet %d: %v", i, err)
+			// 检查是否有完整的原始数据包
+			if len(pkt.RawData) == 0 {
+				logger.GetLogger().Warnf("Packet %d has no RawData (old format), skipping. Please recapture the session.", i)
+				result.FailedCount++
 				continue
 			}
 
-			logger.GetLogger().Debugf("Replayed packet %d/%d", i+1, len(packets))
+			// 使用完整的原始数据包
+			dataToSend := pkt.RawData
+
+			// 发送数据包
+			if err := handle.WritePacketData(dataToSend); err != nil {
+				logger.GetLogger().Errorf("Failed to send packet %d: %v", i, err)
+				result.FailedCount++
+				continue
+			}
+
+			result.SentCount++
+			if (i+1)%100 == 0 || i == len(packets)-1 {
+				logger.GetLogger().Debugf("Replayed packet %d/%d (sent: %d, failed: %d)", i+1, len(packets), result.SentCount, result.FailedCount)
+			}
 		}
 	}
 
-	logger.GetLogger().Info("Packet replay completed")
-	return nil
+	logger.GetLogger().Infof("Packet replay completed (sent: %d, failed: %d)", result.SentCount, result.FailedCount)
+	return result, nil
 }
 
 // ReplayFromPCAP 从 PCAP 文件重放

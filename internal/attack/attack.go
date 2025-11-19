@@ -2,6 +2,7 @@ package attack
 
 import (
 	"fmt"
+	"netsecanalyzer/internal/database"
 	"netsecanalyzer/internal/models"
 	"netsecanalyzer/pkg/logger"
 	"sync"
@@ -73,10 +74,13 @@ func (am *AttackManager) LogAttack(attackType, target, method, userID string, pa
 		ExecutedAt: time.Now(),
 	}
 
-	// 这里应该保存到数据库
-	logger.GetLogger().Infof("Attack logged: %s on %s by %s, status: %s", attackType, target, userID, status)
-	_ = log
+	// 保存到数据库
+	if err := database.GetDB().Create(&log).Error; err != nil {
+		logger.GetLogger().Errorf("Failed to save attack log: %v", err)
+		return fmt.Errorf("failed to save attack log: %w", err)
+	}
 
+	logger.GetLogger().Infof("Attack logged: %s on %s by %s, status: %s (ID: %d)", attackType, target, userID, status, log.ID)
 	return nil
 }
 

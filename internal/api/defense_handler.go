@@ -136,8 +136,6 @@ func (h *DefenseHandler) runIDS(ctx context.Context, task *models.DefenseTask, r
 
 			// 随机生成告警
 			if task.EventsDetected%30 == 0 {
-				task.AlertsCount++
-
 				// 添加告警到 recent_alerts
 				alert := map[string]interface{}{
 					"type":        "port_scan",
@@ -163,6 +161,9 @@ func (h *DefenseHandler) runIDS(ctx context.Context, task *models.DefenseTask, r
 					alerts = alerts[:10]
 				}
 				task.RecentAlerts = models.JSON{"alerts": alerts}
+
+				// 更新告警数量为实际告警列表的长度
+				task.AlertsCount = len(alerts)
 
 				// 如果启用自动阻断
 				if req.AutoBlock {
