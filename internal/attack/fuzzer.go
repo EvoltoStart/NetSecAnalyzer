@@ -1,10 +1,15 @@
 package attack
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
+	"net"
+	"net/http"
 	"netsecanalyzer/pkg/logger"
+	"strings"
 	"time"
 )
 
@@ -167,24 +172,116 @@ func (f *Fuzzer) sendPayload(target string, port int, protocol string, payload [
 
 // sendTCP 发送 TCP 数据
 func (f *Fuzzer) sendTCP(address string, payload []byte, timeout time.Duration) ([]byte, error) {
-	// 实现 TCP 发送
-	// 简化处理
-	logger.GetLogger().Debugf("Sending TCP payload to %s", address)
-	return nil, nil
+	logger.GetLogger().Debugf("Sending TCP payload to %s (%d bytes)", address, len(payload))
+
+	// 建立 TCP 连接
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+	defer conn.Close()
+
+	// 设置读写超时
+	conn.SetDeadline(time.Now().Add(timeout))
+
+	// 发送数据
+	_, err = conn.Write(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send: %w", err)
+	}
+
+	// 接收响应
+	response := make([]byte, 4096)
+	n, err := conn.Read(response)
+	if err != nil {
+		// 超时或连接关闭不算错误
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return response[:0], nil
+		}
+		if err.Error() == "EOF" {
+			return response[:0], nil
+		}
+		return nil, fmt.Errorf("failed to receive: %w", err)
+	}
+
+	return response[:n], nil
 }
 
 // sendUDP 发送 UDP 数据
 func (f *Fuzzer) sendUDP(address string, payload []byte, timeout time.Duration) ([]byte, error) {
-	// 实现 UDP 发送
-	logger.GetLogger().Debugf("Sending UDP payload to %s", address)
-	return nil, nil
+	logger.GetLogger().Debugf("Sending UDP payload to %s (%d bytes)", address, len(payload))
+
+	// 解析地址
+	udpAddr, err := net.ResolveUDPAddr("udp", address)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve address: %w", err)
+	}
+
+	// 建立 UDP 连接
+	conn, err := net.DialUDP("udp", nil, udpAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+	defer conn.Close()
+
+	// 设置读写超时
+	conn.SetDeadline(time.Now().Add(timeout))
+
+	// 发送数据
+	_, err = conn.Write(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send: %w", err)
+	}
+
+	// 接收响应
+	response := make([]byte, 4096)
+	n, err := conn.Read(response)
+	if err != nil {
+		// 超时不算错误
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return response[:0], nil
+		}
+		return nil, fmt.Errorf("failed to receive: %w", err)
+	}
+
+	return response[:n], nil
 }
 
 // sendHTTP 发送 HTTP 请求
 func (f *Fuzzer) sendHTTP(host string, port int, payload []byte, timeout time.Duration) ([]byte, error) {
-	// 实现 HTTP 发送
-	logger.GetLogger().Debugf("Sending HTTP payload to %s:%d", host, port)
-	return nil, nil
+	logger.GetLogger().Debugf("Sending HTTP payload to %s:%d (%d bytes)", host, port, len(payload))
+
+	// 创建 HTTP 客户端
+	client := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
+
+	// 构建 URL
+	url := fmt.Sprintf("http://%s:%d/", host, port)
+
+	// 创建请求
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// 发送请求
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	response, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	return response, nil
 }
 
 // detectAnomaly 检测异常
@@ -225,7 +322,7 @@ func (f *Fuzzer) countAnomalies(results []*FuzzResult) int {
 
 // contains 简单的字符串包含检查
 func contains(str, substr string) bool {
-	return len(str) >= len(substr) && (str == substr || len(str) > len(substr))
+	return strings.Contains(strings.ToLower(str), strings.ToLower(substr))
 }
 
 // GenerateFuzzTemplates 生成模糊测试模板

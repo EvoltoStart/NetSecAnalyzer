@@ -121,6 +121,13 @@ func (c *IPCapture) processPacket(packet gopacket.Packet) {
 		Length:    len(packet.Data()),
 	}
 
+	// 保存完整的原始数据包（用于重放）
+	rawData := packet.Data()
+	if len(rawData) > 0 {
+		pkt.RawData = make([]byte, len(rawData))
+		copy(pkt.RawData, rawData)
+	}
+
 	// 解析网络层
 	if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 		ip, _ := ipLayer.(*layers.IPv4)
@@ -149,16 +156,10 @@ func (c *IPCapture) processPacket(packet gopacket.Packet) {
 		pkt.Protocol = "ICMP"
 	}
 
-	// 提取payload数据 - 修复：确保所有数据包都有payload
-	// 首先尝试获取应用层数据
+	// 提取payload数据（应用层数据）
 	var payload []byte
 	if appLayer := packet.ApplicationLayer(); appLayer != nil {
 		payload = appLayer.Payload()
-	}
-
-	// 如果没有应用层数据，使用完整的数据包数据
-	if len(payload) == 0 {
-		payload = packet.Data()
 	}
 
 	// 保存payload（限制大小）

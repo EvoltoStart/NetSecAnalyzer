@@ -77,6 +77,21 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 		return
 	}
 
+	// 检查数据包是否有 RawData（用于重放）
+	var hasRawDataCount int64
+	database.GetDB().Model(&models.Packet{}).
+		Where("session_id = ? AND raw_data IS NOT NULL AND length(raw_data) > 0", req.SessionID).
+		Count(&hasRawDataCount)
+
+	if hasRawDataCount == 0 {
+		RespondError(c, 400, "This session was captured before the replay feature was added. Please recapture the traffic to enable replay.")
+		return
+	}
+
+	if hasRawDataCount < int64(len(packets)) {
+		logger.GetLogger().Warnf("Session %d: only %d/%d packets have RawData", req.SessionID, hasRawDataCount, len(packets))
+	}
+
 	// 创建任务记录
 	taskID := generateTaskID()
 	task := &models.AttackTask{
@@ -130,25 +145,34 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 			case <-attackSession.StopChan:
 				logger.GetLogger().Info("Replay stopped by user")
 				updateTaskStatus(task.ID, "stopped", 100, map[string]interface{}{
-					"packets_sent":   totalSent,
-					"packets_failed": totalFailed,
-					"duration":       time.Since(startTime).String(),
+					"packetsSent":   totalSent,
+					"packetsFailed": totalFailed,
+					"duration":      time.Since(startTime).String(),
 				})
 				return
 			default:
-				if err := h.replayer.ReplayPackets(ctx, packetPtrs, req.Interface, req.SpeedMultiplier); err != nil {
+				result, err := h.replayer.ReplayPackets(ctx, packetPtrs, req.Interface, req.SpeedMultiplier)
+				if err != nil {
 					logger.GetLogger().Errorf("Replay failed: %v", err)
-					totalFailed += len(packets)
+					if result != nil {
+						totalSent += result.SentCount
+						totalFailed += result.FailedCount
+					} else {
+						totalFailed += len(packets)
+					}
 					updateTaskStatus(task.ID, "failed", 100, map[string]interface{}{
-						"error":          err.Error(),
-						"packets_sent":   totalSent,
-						"packets_failed": totalFailed,
-						"duration":       time.Since(startTime).String(),
+						"error":         err.Error(),
+						"packetsSent":   totalSent,
+						"packetsFailed": totalFailed,
+						"duration":      time.Since(startTime).String(),
 					})
 					h.manager.LogAttack("replay", req.Interface, "packet_replay", req.UserID, nil, err.Error(), "failed")
 					return
 				}
-				totalSent += len(packets)
+
+				// 累加实际发送和失败的数量
+				totalSent += result.SentCount
+				totalFailed += result.FailedCount
 
 				// 更新进度
 				progress := int(float64(i+1) / float64(loopCount) * 100)
@@ -158,9 +182,9 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 
 		// 完成
 		updateTaskStatus(task.ID, "completed", 100, map[string]interface{}{
-			"packets_sent":   totalSent,
-			"packets_failed": totalFailed,
-			"duration":       time.Since(startTime).String(),
+			"packetsSent":   totalSent,
+			"packetsFailed": totalFailed,
+			"duration":      time.Since(startTime).String(),
 		})
 		h.manager.LogAttack("replay", req.Interface, "packet_replay", req.UserID, nil, "success", "success")
 	}()

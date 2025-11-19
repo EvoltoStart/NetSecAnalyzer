@@ -11,6 +11,7 @@ import (
 	"netsecanalyzer/internal/models"
 	"netsecanalyzer/pkg/logger"
 	"netsecanalyzer/pkg/utils"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -831,7 +832,11 @@ func (s *Scanner) checkKnownVulnerabilities(target string, service ServiceInfo) 
 	// 获取启用的 CVE 规则
 	rules := s.cveLoader.GetEnabledRules()
 
+	logger.GetLogger().Debugf("Checking CVE for service: %s, version: %s, banner: %s (total %d rules)",
+		service.Name, service.Version, service.Banner[:min(len(service.Banner), 50)], len(rules))
+
 	// 遍历 CVE 规则库进行匹配
+	matchedRules := 0
 	for _, rule := range rules {
 		// 检查服务名称是否匹配
 		serviceMatch := false
@@ -847,13 +852,19 @@ func (s *Scanner) checkKnownVulnerabilities(target string, service ServiceInfo) 
 			continue
 		}
 
+		matchedRules++
+		logger.GetLogger().Debugf("Service matched rule %s (pattern: %s), checking version: %s (range: %s - %s)",
+			rule.CVEID, rule.ServicePattern, service.Version, rule.VersionMin, rule.VersionMax)
+
 		// 使用新的版本匹配逻辑
 		if !IsVersionVulnerable(service.Version, rule) {
+			logger.GetLogger().Debugf("Version %s not vulnerable to %s (range: %s - %s)",
+				service.Version, rule.CVEID, rule.VersionMin, rule.VersionMax)
 			continue
 		}
 
 		// 匹配成功，创建漏洞记录
-		logger.GetLogger().Infof("Found CVE %s for %s %s on port %d (version range: %s - %s)",
+		logger.GetLogger().Infof("✅ Found CVE %s for %s %s on port %d (version range: %s - %s)",
 			rule.CVEID, service.Name, service.Version, service.Port, rule.VersionMin, rule.VersionMax)
 
 		vuln := models.Vulnerability{
@@ -871,12 +882,26 @@ func (s *Scanner) checkKnownVulnerabilities(target string, service ServiceInfo) 
 		vulnerabilities = append(vulnerabilities, vuln)
 	}
 
+	logger.GetLogger().Debugf("CVE check complete: %d service matches, %d vulnerabilities found",
+		matchedRules, len(vulnerabilities))
+
 	return vulnerabilities
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // checkMisconfigurations 检查配置错误
 func (s *Scanner) checkMisconfigurations(target string, service ServiceInfo) []models.Vulnerability {
 	var vulnerabilities []models.Vulnerability
+
+	// 配置开关：是否报告信息泄露类漏洞（默认关闭，避免误报）
+	reportInfoDisclosure := false
 
 	// 检查常见配置错误
 	switch service.Name {
@@ -912,8 +937,8 @@ func (s *Scanner) checkMisconfigurations(target string, service ServiceInfo) []m
 			vulnerabilities = append(vulnerabilities, vuln)
 		}
 
-		// 检查 HTTP 服务的版本信息泄露
-		if service.Version != "" && strings.Contains(strings.ToLower(service.Banner), "server:") {
+		// 检查 HTTP 服务的版本信息泄露（默认禁用）
+		if reportInfoDisclosure && service.Version != "" && strings.Contains(strings.ToLower(service.Banner), "server:") {
 			vuln := models.Vulnerability{
 				Target:       fmt.Sprintf("%s:%d", target, service.Port),
 				Port:         service.Port,
@@ -950,8 +975,8 @@ func (s *Scanner) checkMisconfigurations(target string, service ServiceInfo) []m
 		}
 
 	case "SSH":
-		// 检查 SSH 版本是否过旧
-		if service.Version != "" && strings.Contains(strings.ToLower(service.Version), "openssh") {
+		// 检查 SSH 版本信息泄露（默认禁用）
+		if reportInfoDisclosure && service.Version != "" && strings.Contains(strings.ToLower(service.Version), "openssh") {
 			vuln := models.Vulnerability{
 				Target:       fmt.Sprintf("%s:%d", target, service.Port),
 				Port:         service.Port,
@@ -966,32 +991,36 @@ func (s *Scanner) checkMisconfigurations(target string, service ServiceInfo) []m
 		}
 
 	case "Telnet":
-		// Telnet 本身就是不安全的
-		vuln := models.Vulnerability{
-			Target:       fmt.Sprintf("%s:%d", target, service.Port),
-			Port:         service.Port,
-			VulnType:     "Insecure Protocol",
-			Severity:     "high",
-			Title:        "Insecure Telnet service detected",
-			Description:  "Telnet transmits data in plaintext, including passwords",
-			Solution:     "Disable Telnet and use SSH instead",
-			DiscoveredAt: time.Now(),
+		// Telnet 本身就是不安全的（默认禁用，因为这不是真正的漏洞）
+		if reportInfoDisclosure {
+			vuln := models.Vulnerability{
+				Target:       fmt.Sprintf("%s:%d", target, service.Port),
+				Port:         service.Port,
+				VulnType:     "Insecure Protocol",
+				Severity:     "high",
+				Title:        "Insecure Telnet service detected",
+				Description:  "Telnet transmits data in plaintext, including passwords",
+				Solution:     "Disable Telnet and use SSH instead",
+				DiscoveredAt: time.Now(),
+			}
+			vulnerabilities = append(vulnerabilities, vuln)
 		}
-		vulnerabilities = append(vulnerabilities, vuln)
 
 	case "MySQL", "PostgreSQL", "Redis":
-		// 数据库服务暴露在公网
-		vuln := models.Vulnerability{
-			Target:       fmt.Sprintf("%s:%d", target, service.Port),
-			Port:         service.Port,
-			VulnType:     "Exposure",
-			Severity:     "medium",
-			Title:        fmt.Sprintf("%s database service exposed", service.Name),
-			Description:  fmt.Sprintf("%s database is accessible from external network", service.Name),
-			Solution:     "Restrict database access to trusted networks only using firewall rules",
-			DiscoveredAt: time.Now(),
+		// 数据库服务暴露检测（默认禁用）
+		if reportInfoDisclosure {
+			vuln := models.Vulnerability{
+				Target:       fmt.Sprintf("%s:%d", target, service.Port),
+				Port:         service.Port,
+				VulnType:     "Exposure",
+				Severity:     "medium",
+				Title:        fmt.Sprintf("%s database service exposed", service.Name),
+				Description:  fmt.Sprintf("%s database is accessible from external network", service.Name),
+				Solution:     "Restrict database access to trusted networks only using firewall rules",
+				DiscoveredAt: time.Now(),
+			}
+			vulnerabilities = append(vulnerabilities, vuln)
 		}
-		vulnerabilities = append(vulnerabilities, vuln)
 	}
 
 	return vulnerabilities
@@ -1302,31 +1331,55 @@ func extractVersion(banner string, serviceName string) string {
 			if len(parts) >= 3 {
 				// 提取 "OpenSSH_8.2p1"，去掉后面的空格和其他信息
 				versionPart := strings.Split(parts[2], " ")[0]
+
+				// 进一步清理：去掉 "p1" 等补丁版本号，只保留主版本号
+				// OpenSSH_8.2p1 -> 8.2
+				if strings.Contains(versionPart, "OpenSSH_") {
+					versionPart = strings.TrimPrefix(versionPart, "OpenSSH_")
+					// 去掉 p1, p2 等补丁号
+					if idx := strings.Index(versionPart, "p"); idx > 0 {
+						versionPart = versionPart[:idx]
+					}
+				}
+
 				return versionPart
 			}
 		}
 	case "HTTP", "HTTPS":
 		// Server: Apache/2.4.41 (Ubuntu)
+		// Server: nginx/1.20.1
 		lines := strings.Split(banner, "\r\n")
 		for _, line := range lines {
 			if strings.HasPrefix(strings.ToLower(line), "server:") {
 				serverInfo := strings.TrimSpace(line[7:])
-				// 去掉括号中的信息，只保留 "Apache/2.4.41"
+				// 去掉括号中的信息，只保留 "Apache/2.4.41" 或 "nginx/1.20.1"
 				serverInfo = strings.Split(serverInfo, " ")[0]
-				return serverInfo
+				serverInfo = strings.Split(serverInfo, "(")[0]
+				return strings.TrimSpace(serverInfo)
 			}
 		}
 	case "FTP":
 		// 220 ProFTPD 1.3.5 Server
+		// 220 vsftpd 2.3.4
 		if len(banner) > 4 {
 			parts := strings.Fields(banner)
 			if len(parts) >= 2 {
-				return strings.Join(parts[1:], " ")
+				// 提取服务名和版本号
+				version := strings.Join(parts[1:], " ")
+				// 去掉 "Server" 等后缀
+				version = strings.Split(version, "Server")[0]
+				return strings.TrimSpace(version)
 			}
 		}
 	case "MySQL":
-		// MySQL 版本在握手包中
+		// MySQL 版本在握手包中，通常难以直接提取
+		// 如果 banner 中包含版本号，尝试提取
 		if strings.Contains(banner, "mysql") || strings.Contains(banner, "MySQL") {
+			// 尝试提取版本号 (例如: 5.7.33, 8.0.21)
+			re := regexp.MustCompile(`(\d+\.\d+\.\d+)`)
+			if matches := re.FindStringSubmatch(banner); len(matches) > 0 {
+				return "MySQL " + matches[1]
+			}
 			return "MySQL"
 		}
 	case "Redis":
@@ -1334,16 +1387,40 @@ func extractVersion(banner string, serviceName string) string {
 		lines := strings.Split(banner, "\n")
 		for _, line := range lines {
 			if strings.HasPrefix(line, "redis_version:") {
-				return "Redis " + strings.TrimSpace(line[14:])
+				version := strings.TrimSpace(line[14:])
+				return "Redis " + version
 			}
+		}
+	case "PostgreSQL":
+		// PostgreSQL 版本提取
+		if strings.Contains(banner, "PostgreSQL") {
+			re := regexp.MustCompile(`PostgreSQL\s+(\d+\.\d+(?:\.\d+)?)`)
+			if matches := re.FindStringSubmatch(banner); len(matches) > 1 {
+				return "PostgreSQL " + matches[1]
+			}
+			return "PostgreSQL"
+		}
+	case "MongoDB":
+		// MongoDB 版本提取
+		if strings.Contains(banner, "MongoDB") {
+			re := regexp.MustCompile(`MongoDB\s+(\d+\.\d+\.\d+)`)
+			if matches := re.FindStringSubmatch(banner); len(matches) > 1 {
+				return "MongoDB " + matches[1]
+			}
+			return "MongoDB"
 		}
 	}
 
-	// 通用版本提取：简化实现，返回前 200 个字符
-	if len(banner) > 200 {
-		return banner[:200]
+	// 通用版本提取：尝试使用正则表达式提取版本号
+	// 匹配常见的版本号格式：x.y.z 或 x.y
+	re := regexp.MustCompile(`(\d+\.\d+(?:\.\d+)?)`)
+	if matches := re.FindStringSubmatch(banner); len(matches) > 0 {
+		return matches[1]
 	}
-	return banner
+
+	// 如果无法提取版本号，返回空字符串而不是整个 banner
+	// 这样可以避免误匹配
+	return ""
 }
 
 // cleanBanner 清理 banner 字符串
