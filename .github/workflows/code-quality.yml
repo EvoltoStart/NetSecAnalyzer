@@ -1,12 +1,12 @@
-name: Code Quality
+name: CI
 
 on:
-  # 1) 当代码被推送到 master 分支时触发
+  # 当代码被推送到 master 分支时触发
   push:
     branches:
       - master
 
-  # 2) 当有 PR 且目标分支是 master 时触发
+  # 当 PR 的目标分支是 master 时触发
   pull_request:
     branches:
       - master
@@ -16,7 +16,8 @@ on:
       - reopened
 
 jobs:
-  backend-go-quality:
+  # ======================= 后端：代码风格检查 =======================
+  backend-lint:
     name: Backend Go fmt & vet
     runs-on: ubuntu-latest
 
@@ -24,12 +25,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # gopacket/pcap 需要的系统依赖
+      - name: Install libpcap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
 
-      # gofmt 检查：有未格式化文件就直接失败
+      # gofmt 检查：有未格式化的文件就直接失败
       - name: Check gofmt
         run: |
           UNFORMATTED=$(gofmt -l ./cmd ./internal ./pkg || true)
@@ -39,19 +46,15 @@ jobs:
             exit 1
           fi
 
-      # 静态检查
+      # go vet 静态分析
       - name: Run go vet
         run: go vet ./...
 
-      # 如需顺便跑单元测试，可以取消下面注释
-      # - name: Run go test
-      #   run: go test ./...
-
+  # ======================= 前端：ESLint 代码规范检查 =======================
   frontend-lint:
-    name: Frontend ESLint Check
+    name: Frontend ESLint Check (pnpm)
     runs-on: ubuntu-latest
 
-    # 所有命令都在 frontend 目录执行
     defaults:
       run:
         working-directory: frontend
@@ -60,20 +63,86 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          # 不再指定 cache-dependency-path，避免路径不存在的报错
+          cache: 'pnpm'
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
-      # 使用 ESLint 做代码规范/格式检查（只检查，不自动修复）
+      # 如果你在 package.json 里有 lint 脚本，也可以用 pnpm lint
       - name: Run ESLint
-        run: npx eslint . --ext .vue,.js,.jsx,.cjs,.mjs --max-warnings=0 --ignore-path .gitignore
+        run: pnpm exec eslint . --ext .vue,.js,.jsx,.cjs,.mjs --max-warnings=0 --ignore-path .gitignore
 
-      # 如果你以后加了 Prettier，也可以在这里再加一个格式检查步骤：
-      # - name: Run Prettier check
-      #   run: npx prettier --check .
+  # ======================= 后端：构建 + 单元测试 =======================
+  backend-build-test:
+    name: Backend build & unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install libpcap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      # 构建所有 Go 包，保证能正常编译
+      - name: Go build
+        run: go build ./...
+
+      # 单元测试（如果没有测试文件也会直接通过）
+      - name: Go unit tests
+        run: go test ./...
+
+  # ======================= 前端：构建（可选再加测试） =======================
+  frontend-build:
+    name: Frontend build (pnpm)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 前端构建检查
+      - name: Run frontend build
+        run: pnpm build
+
+      # 如果以后加了前端单元测试（比如 vitest / jest），可以在这里追加：
+      # - name: Frontend unit tests
+      #   run: pnpm test
