@@ -79,9 +79,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 如果你在 package.json 里有 lint 脚本，也可以用 pnpm lint
+      # ⚠️ 去掉 --ignore-path .gitignore，避免找不到文件
       - name: Run ESLint
-        run: pnpm exec eslint . --ext .vue,.js,.jsx,.cjs,.mjs --max-warnings=0 --ignore-path .gitignore
+        run: pnpm exec eslint . --ext .vue,.js,.jsx,.cjs,.mjs --max-warnings=0
 
   # ======================= 后端：构建 + 单元测试 =======================
   backend-build-test:
@@ -106,11 +106,11 @@ jobs:
       - name: Go build
         run: go build ./...
 
-      # 单元测试（如果没有测试文件也会直接通过）
+      # 单元测试（如果暂时没有 *_test.go 也会直接通过）
       - name: Go unit tests
         run: go test ./...
 
-  # ======================= 前端：构建（可选再加测试） =======================
+  # ======================= 前端：构建 =======================
   frontend-build:
     name: Frontend build (pnpm)
     runs-on: ubuntu-latest
@@ -139,10 +139,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 前端构建检查
       - name: Run frontend build
         run: pnpm build
-
-      # 如果以后加了前端单元测试（比如 vitest / jest），可以在这里追加：
+      # 如果以后加了前端测试脚本（例如 vitest / jest），可以在这里追加：
       # - name: Frontend unit tests
       #   run: pnpm test
