@@ -5,7 +5,7 @@ module.exports = {
     es2021: true,
     node: true,
   },
-  // 先用推荐规则打底，再按需要关掉/放宽
+  // 先用推荐规则打底，再按需要关掉或者放宽
   extends: [
     'eslint:recommended',
     'plugin:vue/vue3-recommended',
