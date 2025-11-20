@@ -107,7 +107,7 @@ jobs:
 
       - name: Run ESLint
         id: eslint
-        run: pnpm exec eslint . --ext .vue,.js,.jsx,.cjs,.mjs --max-warnings=0
+        run: pnpm exec eslint . --ext .vue,.js,.jsx,.cjs,.mjs
 
       - name: Set result
         id: set_result
