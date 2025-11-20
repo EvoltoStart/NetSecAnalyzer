@@ -1,4 +1,3 @@
-// 宽松一点的 Vue3 + JS ESLint 配置
 module.exports = {
   root: true,
   env: {
