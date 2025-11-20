@@ -1,0 +1,180 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+
+  # ======================= 后端：代码风格检查 =======================
+  backend-lint:
+    name: Backend Go fmt & vet
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.set_result.outputs.passed }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libpcap
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Check gofmt
+        id: gofmt
+        run: |
+          UNFORMATTED=$(gofmt -l ./cmd ./internal ./pkg || true)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "FAILED"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Run go vet
+        id: govet
+        run: go vet ./...
+
+      - name: Set result
+        id: set_result
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+  # ======================= 后端：构建 + 单元测试 =======================
+  backend-build-test:
+    name: Backend build & unit tests
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.set_result.outputs.passed }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libpcap
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build
+        id: gobuild
+        run: go build ./...
+
+      - name: Run go tests
+        id: gotest
+        run: go test ./...
+
+      - name: Set result
+        id: set_result
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+  # ======================= 前端：ESLint =======================
+  frontend-lint:
+    name: Frontend ESLint Check (pnpm)
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.set_result.outputs.passed }}
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run ESLint
+        id: eslint
+        run: pnpm exec eslint . --ext .vue,.js,.jsx,.cjs,.mjs
+
+      - name: Set result
+        id: set_result
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+  # ======================= 前端：构建 =======================
+  frontend-build:
+    name: Frontend build (pnpm)
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.set_result.outputs.passed }}
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        id: pnpm_build
+        run: pnpm build
+
+      - name: Set result
+        id: set_result
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+
+  # ======================= PR 自动评论 =======================
+  pr-comment:
+    name: PR Result Comment
+    needs:
+      - backend-lint
+      - backend-build-test
+      - frontend-lint
+      - frontend-build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Create PR comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ## 🧪 CI 检查结果总结
+
+            | 模块 | 状态 |
+            |------|--------|
+            | Backend fmt & vet | ${{ needs.backend-lint.result == 'success' && '✔ 通过' || '❌ 失败' }} |
+            | Backend build & test | ${{ needs.backend-build-test.result == 'success' && '✔ 通过' || '❌ 失败' }} |
+            | Frontend ESLint | ${{ needs.frontend-lint.result == 'success' && '✔ 通过' || '❌ 失败' }} |
+            | Frontend build | ${{ needs.frontend-build.result == 'success' && '✔ 通过' || '❌ 失败' }} |
+
+            > 如有模块失败，请点击上方 Actions 日志查看失败原因并修复。
