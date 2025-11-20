@@ -1,0 +1,47 @@
+name: Code Quality
+
+on:
+  # 当代码被推送到 main 分支时触发
+  push:
+    branches:
+      - main
+
+  # 当有 PR 且目标是 main 时触发
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  frontend-lint:
+    name: Lint Check (frontend)
+    runs-on: ubuntu-latest
+
+    # 所有命令都在 frontend 目录下执行
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 代码规范 / 格式检查（只检查，不修复）
+      - name: Run ESLint check
+        run: npm run lint:check
+        # 如果你没有 lint:check，只保留原来的 lint：
+        # run: npm run lint
