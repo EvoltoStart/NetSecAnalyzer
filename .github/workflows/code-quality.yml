@@ -1,0 +1,79 @@
+name: Code Quality
+
+on:
+  # 1) 当代码被推送到 master 分支时触发
+  push:
+    branches:
+      - master
+
+  # 2) 当有 PR 且目标分支是 master 时触发
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  backend-go-quality:
+    name: Backend Go fmt & vet
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      # gofmt 检查：有未格式化文件就直接失败
+      - name: Check gofmt
+        run: |
+          UNFORMATTED=$(gofmt -l ./cmd ./internal ./pkg || true)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "These files are not gofmt-ed:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      # 静态检查
+      - name: Run go vet
+        run: go vet ./...
+
+      # 如需顺便跑单元测试，可以取消下面注释
+      # - name: Run go test
+      #   run: go test ./...
+
+  frontend-lint:
+    name: Frontend ESLint Check
+    runs-on: ubuntu-latest
+
+    # 所有命令都在 frontend 目录执行
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          # 不再指定 cache-dependency-path，避免路径不存在的报错
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 使用 ESLint 做代码规范/格式检查（只检查，不自动修复）
+      - name: Run ESLint
+        run: npx eslint . --ext .vue,.js,.jsx,.cjs,.mjs --max-warnings=0 --ignore-path .gitignore
+
+      # 如果你以后加了 Prettier，也可以在这里再加一个格式检查步骤：
+      # - name: Run Prettier check
+      #   run: npx prettier --check .
