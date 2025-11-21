@@ -214,14 +214,17 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 // StartFuzzing 启动 Fuzzing
 func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 	var req struct {
-		Target       string  `json:"target" binding:"required"`
-		Port         int     `json:"port" binding:"required"`
-		Protocol     string  `json:"protocol" binding:"required"`
-		Template     string  `json:"template"`
-		Iterations   int     `json:"iterations"`
-		MutationRate float64 `json:"mutation_rate"`
-		Timeout      int     `json:"timeout"`
-		UserID       string  `json:"user_id"`
+		Target           string   `json:"target" binding:"required"`
+		Port             int      `json:"port" binding:"required"`
+		Protocol         string   `json:"protocol" binding:"required"`
+		Template         string   `json:"template"`
+		Iterations       int      `json:"iterations"`
+		MutationRate     float64  `json:"mutation_rate"`
+		MutationStrategy string   `json:"mutation_strategy"`
+		Timeout          int      `json:"timeout"`
+		Concurrency      int      `json:"concurrency"`
+		AnomalyDetection []string `json:"anomaly_detection"`
+		UserID           string   `json:"user_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -238,6 +241,15 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 	}
 	if req.Timeout == 0 {
 		req.Timeout = 5
+	}
+	if req.MutationStrategy == "" {
+		req.MutationStrategy = "smart"
+	}
+	if req.Concurrency == 0 {
+		req.Concurrency = 1
+	}
+	if len(req.AnomalyDetection) == 0 {
+		req.AnomalyDetection = []string{"timeout", "error"}
 	}
 
 	// 检查授权
@@ -256,13 +268,16 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 		Status:   "running",
 		Progress: 0,
 		Parameters: models.JSON(map[string]interface{}{
-			"target":        req.Target,
-			"port":          req.Port,
-			"protocol":      req.Protocol,
-			"template":      req.Template,
-			"iterations":    req.Iterations,
-			"mutation_rate": req.MutationRate,
-			"timeout":       req.Timeout,
+			"target":            req.Target,
+			"port":              req.Port,
+			"protocol":          req.Protocol,
+			"template":          req.Template,
+			"iterations":        req.Iterations,
+			"mutation_rate":     req.MutationRate,
+			"mutation_strategy": req.MutationStrategy,
+			"timeout":           req.Timeout,
+			"concurrency":       req.Concurrency,
+			"anomaly_detection": req.AnomalyDetection,
 		}),
 		UserID:    req.UserID,
 		CreatedAt: time.Now(),
@@ -284,13 +299,16 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 
 		// 准备配置
 		config := &attack.FuzzConfig{
-			Target:       req.Target,
-			Port:         req.Port,
-			Protocol:     req.Protocol,
-			Template:     []byte(req.Template),
-			Iterations:   req.Iterations,
-			MutationRate: req.MutationRate,
-			Timeout:      time.Duration(req.Timeout) * time.Second,
+			Target:           req.Target,
+			Port:             req.Port,
+			Protocol:         req.Protocol,
+			Template:         []byte(req.Template),
+			Iterations:       req.Iterations,
+			MutationRate:     req.MutationRate,
+			MutationStrategy: req.MutationStrategy,
+			Timeout:          time.Duration(req.Timeout) * time.Second,
+			Concurrency:      req.Concurrency,
+			AnomalyDetection: req.AnomalyDetection,
 		}
 
 		// 执行 Fuzzing

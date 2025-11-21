@@ -1443,6 +1443,8 @@ const showPreview = async () => {
 
 // 协议改变时更新模板
 const onProtocolChange = () => {
+  // 清空当前模板，让loadFuzzTemplates设置新的默认模板
+  fuzzForm.value.template = ''
   loadFuzzTemplates()
 }
 
@@ -1452,26 +1454,40 @@ const loadFuzzTemplates = () => {
   const templates = {
     'HTTP': [
       { name: 'GET 请求', value: 'GET / HTTP/1.1\r\nHost: target\r\n\r\n' },
-      { name: 'POST 请求', value: 'POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\n\r\n' }
+      { name: 'POST 请求', value: 'POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\n\r\n' },
+      { name: 'PUT 请求', value: 'PUT / HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\n\r\n' },
+      { name: 'DELETE 请求', value: 'DELETE / HTTP/1.1\r\nHost: target\r\n\r\n' }
     ],
     'Modbus': [
-      { name: '读取保持寄存器', value: '00010000000601030000000A' },
-      { name: '读取输入寄存器', value: '00010000000601040000000A' }
+      { name: '读取保持寄存器', value: '\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x0A' },
+      { name: '读取输入寄存器', value: '\x00\x01\x00\x00\x00\x06\x01\x04\x00\x00\x00\x0A' },
+      { name: '写单个寄存器', value: '\x00\x01\x00\x00\x00\x06\x01\x06\x00\x00\x00\x03' },
+      { name: '读取线圈', value: '\x00\x01\x00\x00\x00\x06\x01\x01\x00\x00\x00\x10' }
     ],
     'FTP': [
       { name: 'USER 命令', value: 'USER anonymous\r\n' },
-      { name: 'PASS 命令', value: 'PASS guest\r\n' }
+      { name: 'PASS 命令', value: 'PASS guest\r\n' },
+      { name: 'LIST 命令', value: 'LIST\r\n' },
+      { name: 'RETR 命令', value: 'RETR file.txt\r\n' }
     ],
     'TCP': [
+      { name: '简单文本', value: 'Hello World' },
+      { name: '二进制数据', value: '\x00\x01\x02\x03\x04\x05' },
+      { name: '长字符串', value: 'A'.repeat(100) },
       { name: '自定义 TCP', value: '' }
     ],
     'UDP': [
+      { name: 'DNS 查询', value: '\x00\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00' },
+      { name: 'SNMP GET', value: '\x30\x26\x02\x01\x00\x04\x06\x70\x75\x62\x6c\x69\x63' },
+      { name: '简单文本', value: 'UDP Test Data' },
       { name: '自定义 UDP', value: '' }
     ]
   }
 
   fuzzTemplates.value = templates[protocol] || []
-  if (fuzzTemplates.value.length > 0) {
+  
+  // 如果有模板且当前template为空，则设置第一个模板
+  if (fuzzTemplates.value.length > 0 && !fuzzForm.value.template) {
     fuzzForm.value.template = fuzzTemplates.value[0].value
   }
 }
