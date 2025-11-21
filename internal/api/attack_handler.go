@@ -31,12 +31,18 @@ func NewAttackHandler(m *attack.AttackManager) *AttackHandler {
 // ReplayPackets 重放数据包
 func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 	var req struct {
-		SessionID       uint    `json:"session_id" binding:"required"`
-		Interface       string  `json:"interface" binding:"required"`
-		SpeedMultiplier float64 `json:"speed_multiplier"`
-		Mode            string  `json:"mode"`
-		LoopCount       int     `json:"loop_count"`
-		UserID          string  `json:"user_id"`
+		SessionID         uint    `json:"session_id" binding:"required"`
+		Interface         string  `json:"interface" binding:"required"`
+		SpeedMultiplier   float64 `json:"speed_multiplier"`
+		Mode              string  `json:"mode"`
+		LoopCount         int     `json:"loop_count"`
+		Duration          int     `json:"duration"`           // 持续时间（秒）
+		ProtocolFilter    string  `json:"protocol_filter"`    // 协议过滤
+		SrcAddrFilter     string  `json:"src_addr_filter"`    // 源地址过滤
+		DstAddrFilter     string  `json:"dst_addr_filter"`    // 目标地址过滤
+		PreserveTimestamp bool    `json:"preserve_timestamp"` // 保留时间戳
+		ModifyChecksum    bool    `json:"modify_checksum"`    // 修正校验和
+		UserID            string  `json:"user_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -68,9 +74,23 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 		return
 	}
 
-	// 获取数据包
+	// 构建数据包查询，支持过滤
+	query := database.GetDB().Where("session_id = ?", req.SessionID)
+
+	// 应用过滤器
+	if req.ProtocolFilter != "" {
+		query = query.Where("protocol = ?", req.ProtocolFilter)
+	}
+	if req.SrcAddrFilter != "" {
+		query = query.Where("src_addr = ?", req.SrcAddrFilter)
+	}
+	if req.DstAddrFilter != "" {
+		query = query.Where("dst_addr = ?", req.DstAddrFilter)
+	}
+
+	// 获取过滤后的数据包
 	var packets []models.Packet
-	database.GetDB().Where("session_id = ?", req.SessionID).Find(&packets)
+	query.Find(&packets)
 
 	if len(packets) == 0 {
 		RespondNotFound(c, "No packets found")
@@ -101,13 +121,19 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 		Status:   "running",
 		Progress: 0,
 		Parameters: models.JSON(map[string]interface{}{
-			"session_id":       req.SessionID,
-			"session_name":     session.Name,
-			"interface":        req.Interface,
-			"speed_multiplier": req.SpeedMultiplier,
-			"mode":             req.Mode,
-			"loop_count":       req.LoopCount,
-			"packet_count":     len(packets),
+			"session_id":         req.SessionID,
+			"session_name":       session.Name,
+			"interface":          req.Interface,
+			"speed_multiplier":   req.SpeedMultiplier,
+			"mode":               req.Mode,
+			"loop_count":         req.LoopCount,
+			"duration":           req.Duration,
+			"protocol_filter":    req.ProtocolFilter,
+			"src_addr_filter":    req.SrcAddrFilter,
+			"dst_addr_filter":    req.DstAddrFilter,
+			"preserve_timestamp": req.PreserveTimestamp,
+			"modify_checksum":    req.ModifyChecksum,
+			"packet_count":       len(packets),
 		}),
 		UserID:    req.UserID,
 		CreatedAt: time.Now(),
@@ -126,64 +152,48 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 	}
 
 	// 创建攻击会话
-	attackSession := h.manager.CreateSession(taskID, "replay", req.Interface)
+	_ = h.manager.CreateSession(taskID, "replay", req.Interface)
 
 	// 异步执行重放
 	go func() {
 		ctx := context.Background()
 		startTime := time.Now()
-		var totalSent, totalFailed int
 
-		// 根据模式执行
-		loopCount := 1
-		if req.Mode == "loop" {
-			loopCount = req.LoopCount
+		// 创建重放配置
+		config := &attack.ReplayConfig{
+			Interface:         req.Interface,
+			SpeedMultiplier:   req.SpeedMultiplier,
+			Mode:              req.Mode,
+			LoopCount:         req.LoopCount,
+			Duration:          req.Duration,
+			PreserveTimestamp: req.PreserveTimestamp,
+			ModifyChecksum:    req.ModifyChecksum,
 		}
 
-		for i := 0; i < loopCount; i++ {
-			select {
-			case <-attackSession.StopChan:
-				logger.GetLogger().Info("Replay stopped by user")
-				updateTaskStatus(task.ID, "stopped", 100, map[string]interface{}{
-					"packetsSent":   totalSent,
-					"packetsFailed": totalFailed,
-					"duration":      time.Since(startTime).String(),
-				})
-				return
-			default:
-				result, err := h.replayer.ReplayPackets(ctx, packetPtrs, req.Interface, req.SpeedMultiplier)
-				if err != nil {
-					logger.GetLogger().Errorf("Replay failed: %v", err)
-					if result != nil {
-						totalSent += result.SentCount
-						totalFailed += result.FailedCount
-					} else {
-						totalFailed += len(packets)
-					}
-					updateTaskStatus(task.ID, "failed", 100, map[string]interface{}{
-						"error":         err.Error(),
-						"packetsSent":   totalSent,
-						"packetsFailed": totalFailed,
-						"duration":      time.Since(startTime).String(),
-					})
-					h.manager.LogAttack("replay", req.Interface, "packet_replay", req.UserID, nil, err.Error(), "failed")
-					return
-				}
-
-				// 累加实际发送和失败的数量
-				totalSent += result.SentCount
-				totalFailed += result.FailedCount
-
-				// 更新进度
-				progress := int(float64(i+1) / float64(loopCount) * 100)
-				updateTaskProgress(task.ID, progress)
+		// 执行重放
+		result, err := h.replayer.ReplayPackets(ctx, packetPtrs, config)
+		if err != nil {
+			logger.GetLogger().Errorf("Replay failed: %v", err)
+			totalSent := 0
+			totalFailed := len(packets)
+			if result != nil {
+				totalSent = result.SentCount
+				totalFailed = result.FailedCount
 			}
+			updateTaskStatus(task.ID, "failed", 100, map[string]interface{}{
+				"error":         err.Error(),
+				"packetsSent":   totalSent,
+				"packetsFailed": totalFailed,
+				"duration":      time.Since(startTime).String(),
+			})
+			h.manager.LogAttack("replay", req.Interface, "packet_replay", req.UserID, nil, err.Error(), "failed")
+			return
 		}
 
 		// 完成
 		updateTaskStatus(task.ID, "completed", 100, map[string]interface{}{
-			"packetsSent":   totalSent,
-			"packetsFailed": totalFailed,
+			"packetsSent":   result.SentCount,
+			"packetsFailed": result.FailedCount,
 			"duration":      time.Since(startTime).String(),
 		})
 		h.manager.LogAttack("replay", req.Interface, "packet_replay", req.UserID, nil, "success", "success")
@@ -204,14 +214,17 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 // StartFuzzing 启动 Fuzzing
 func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 	var req struct {
-		Target       string  `json:"target" binding:"required"`
-		Port         int     `json:"port" binding:"required"`
-		Protocol     string  `json:"protocol" binding:"required"`
-		Template     string  `json:"template"`
-		Iterations   int     `json:"iterations"`
-		MutationRate float64 `json:"mutation_rate"`
-		Timeout      int     `json:"timeout"`
-		UserID       string  `json:"user_id"`
+		Target           string   `json:"target" binding:"required"`
+		Port             int      `json:"port" binding:"required"`
+		Protocol         string   `json:"protocol" binding:"required"`
+		Template         string   `json:"template"`
+		Iterations       int      `json:"iterations"`
+		MutationRate     float64  `json:"mutation_rate"`
+		MutationStrategy string   `json:"mutation_strategy"`
+		Timeout          int      `json:"timeout"`
+		Concurrency      int      `json:"concurrency"`
+		AnomalyDetection []string `json:"anomaly_detection"`
+		UserID           string   `json:"user_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -228,6 +241,15 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 	}
 	if req.Timeout == 0 {
 		req.Timeout = 5
+	}
+	if req.MutationStrategy == "" {
+		req.MutationStrategy = "smart"
+	}
+	if req.Concurrency == 0 {
+		req.Concurrency = 1
+	}
+	if len(req.AnomalyDetection) == 0 {
+		req.AnomalyDetection = []string{"timeout", "error"}
 	}
 
 	// 检查授权
@@ -246,13 +268,16 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 		Status:   "running",
 		Progress: 0,
 		Parameters: models.JSON(map[string]interface{}{
-			"target":        req.Target,
-			"port":          req.Port,
-			"protocol":      req.Protocol,
-			"template":      req.Template,
-			"iterations":    req.Iterations,
-			"mutation_rate": req.MutationRate,
-			"timeout":       req.Timeout,
+			"target":            req.Target,
+			"port":              req.Port,
+			"protocol":          req.Protocol,
+			"template":          req.Template,
+			"iterations":        req.Iterations,
+			"mutation_rate":     req.MutationRate,
+			"mutation_strategy": req.MutationStrategy,
+			"timeout":           req.Timeout,
+			"concurrency":       req.Concurrency,
+			"anomaly_detection": req.AnomalyDetection,
 		}),
 		UserID:    req.UserID,
 		CreatedAt: time.Now(),
@@ -274,13 +299,16 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 
 		// 准备配置
 		config := &attack.FuzzConfig{
-			Target:       req.Target,
-			Port:         req.Port,
-			Protocol:     req.Protocol,
-			Template:     []byte(req.Template),
-			Iterations:   req.Iterations,
-			MutationRate: req.MutationRate,
-			Timeout:      time.Duration(req.Timeout) * time.Second,
+			Target:           req.Target,
+			Port:             req.Port,
+			Protocol:         req.Protocol,
+			Template:         []byte(req.Template),
+			Iterations:       req.Iterations,
+			MutationRate:     req.MutationRate,
+			MutationStrategy: req.MutationStrategy,
+			Timeout:          time.Duration(req.Timeout) * time.Second,
+			Concurrency:      req.Concurrency,
+			AnomalyDetection: req.AnomalyDetection,
 		}
 
 		// 执行 Fuzzing
@@ -427,10 +455,52 @@ func (h *AttackHandler) DeleteTask(c *gin.Context) {
 	RespondSuccess(c, gin.H{"message": "Task deleted"})
 }
 
-// 辅助函数
+// BatchDeleteTasks 批量删除任务
+func (h *AttackHandler) BatchDeleteTasks(c *gin.Context) {
+	var req struct {
+		TaskIDs []uint `json:"task_ids" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondBadRequest(c, err.Error())
+		return
+	}
+
+	if len(req.TaskIDs) == 0 {
+		RespondBadRequest(c, "No task IDs provided")
+		return
+	}
+
+	// 检查是否有正在运行的任务
+	var runningCount int64
+	database.GetDB().Model(&models.AttackTask{}).
+		Where("id IN ? AND status = ?", req.TaskIDs, "running").
+		Count(&runningCount)
+
+	if runningCount > 0 {
+		RespondBadRequest(c, "Cannot delete running tasks")
+		return
+	}
+
+	// 批量删除
+	result := database.GetDB().Where("id IN ?", req.TaskIDs).Delete(&models.AttackTask{})
+	if result.Error != nil {
+		RespondInternalError(c, "Failed to delete tasks")
+		return
+	}
+
+	RespondSuccess(c, gin.H{
+		"message": "Tasks deleted successfully",
+		"deleted": result.RowsAffected,
+	})
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
+}
 
 func generateTaskID() string {
-	return fmt.Sprintf("task_%d", time.Now().UnixNano())
+	return fmt.Sprintf("attack-%d", time.Now().Unix())
 }
 
 func updateTaskProgress(taskID uint, progress int) {
