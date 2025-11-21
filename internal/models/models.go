@@ -120,6 +120,29 @@ type DefenseTask struct {
 	CompletedAt    *time.Time `json:"completedAt,omitempty"`
 }
 
+// IDSAlert IDS 告警记录
+type IDSAlert struct {
+	ID              uint       `gorm:"primaryKey" json:"id"`
+	TaskID          uint       `gorm:"not null;index" json:"taskId"`                              // 关联的 defense_task ID
+	Type            string     `gorm:"size:50;not null;index" json:"type"`                        // 告警类型
+	Severity        string     `gorm:"size:20;not null;index" json:"severity"`                    // 严重程度
+	Description     string     `gorm:"type:text;not null" json:"description"`                     // 告警描述
+	Source          string     `gorm:"size:100;index" json:"source,omitempty"`                    // 攻击来源 IP
+	Destination     string     `gorm:"size:100" json:"destination,omitempty"`                     // 攻击目标 IP
+	SourcePort      *int       `json:"sourcePort,omitempty"`                                      // 源端口
+	DestinationPort *int       `json:"destinationPort,omitempty"`                                 // 目标端口
+	Protocol        string     `gorm:"size:20" json:"protocol,omitempty"`                         // 协议
+	Details         JSON       `gorm:"type:text" json:"details,omitempty"`                        // 详细信息
+	Status          string     `gorm:"size:20;default:new;index" json:"status"`                   // 状态: new, acknowledged, resolved, ignored
+	AcknowledgedBy  string     `gorm:"size:100" json:"acknowledgedBy,omitempty"`                  // 确认人
+	AcknowledgedAt  *time.Time `json:"acknowledgedAt,omitempty"`                                  // 确认时间
+	ResolvedBy      string     `gorm:"size:100" json:"resolvedBy,omitempty"`                      // 解决人
+	ResolvedAt      *time.Time `json:"resolvedAt,omitempty"`                                      // 解决时间
+	Notes           string     `gorm:"type:text" json:"notes,omitempty"`                          // 备注
+	Timestamp       time.Time  `gorm:"not null;index:idx_ids_alerts_timestamp" json:"timestamp"`  // 告警发生时间
+	CreatedAt       time.Time  `gorm:"not null;index:idx_ids_alerts_created_at" json:"createdAt"` // 创建时间
+}
+
 // ProtocolStat 协议统计
 type ProtocolStat struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
@@ -202,4 +225,8 @@ func (AttackLog) TableName() string {
 
 func (ProtocolStat) TableName() string {
 	return "protocol_stats"
+}
+
+func (IDSAlert) TableName() string {
+	return "ids_alerts"
 }

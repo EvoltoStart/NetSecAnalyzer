@@ -132,6 +132,7 @@ func autoMigrateSafely() error {
 		&models.AttackLog{},
 		&models.AttackTask{},
 		&models.DefenseTask{},
+		&models.IDSAlert{},
 		&models.ProtocolStat{},
 	}
 

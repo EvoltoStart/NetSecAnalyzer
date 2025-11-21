@@ -12,13 +12,14 @@ import (
 
 // Router API 路由器
 type Router struct {
-	engine         *gin.Engine
-	captureHandler *CaptureHandler
-	analyzeHandler *AnalyzeHandler
-	scanHandler    *ScanHandler
-	attackHandler  *AttackHandler
-	defenseHandler *DefenseHandler
-	statsHandler   *StatsHandler
+	engine          *gin.Engine
+	captureHandler  *CaptureHandler
+	analyzeHandler  *AnalyzeHandler
+	scanHandler     *ScanHandler
+	attackHandler   *AttackHandler
+	defenseHandler  *DefenseHandler
+	statsHandler    *StatsHandler
+	idsRulesHandler *IDSRulesHandler
 }
 
 // NewRouter 创建路由器
@@ -38,15 +39,17 @@ func NewRouter(mode string) *Router {
 	attackHandler := NewAttackHandler(attack.NewAttackManager(true, 100))
 	defenseHandler := NewDefenseHandler()
 	statsHandler := NewStatsHandler()
+	idsRulesHandler := NewIDSRulesHandler()
 
 	router := &Router{
-		engine:         engine,
-		captureHandler: captureHandler,
-		analyzeHandler: analyzeHandler,
-		scanHandler:    scanHandler,
-		attackHandler:  attackHandler,
-		defenseHandler: defenseHandler,
-		statsHandler:   statsHandler,
+		engine:          engine,
+		captureHandler:  captureHandler,
+		analyzeHandler:  analyzeHandler,
+		scanHandler:     scanHandler,
+		attackHandler:   attackHandler,
+		defenseHandler:  defenseHandler,
+		statsHandler:    statsHandler,
+		idsRulesHandler: idsRulesHandler,
 	}
 
 	router.setupRoutes()
@@ -111,6 +114,7 @@ func (r *Router) setupRoutes() {
 			attack.GET("/tasks/:id", r.attackHandler.GetTask)
 			attack.POST("/tasks/:id/stop", r.attackHandler.StopTask)
 			attack.DELETE("/tasks/:id", r.attackHandler.DeleteTask)
+			attack.POST("/tasks/batch-delete", r.attackHandler.BatchDeleteTasks)
 		}
 
 		// 防御模拟
@@ -118,7 +122,30 @@ func (r *Router) setupRoutes() {
 		{
 			defense.POST("/ids/start", r.defenseHandler.StartIDS)
 			defense.POST("/ids/:id/stop", r.defenseHandler.StopIDS)
+			defense.DELETE("/ids/tasks/:id", r.defenseHandler.DeleteIDSTask)
+			defense.POST("/ids/tasks/batch-delete", r.defenseHandler.BatchDeleteIDSTasks)
 			defense.GET("/ids/tasks", r.defenseHandler.GetIDSTasks)
+
+			// 告警管理
+			defense.GET("/ids/alerts", r.defenseHandler.GetIDSAlerts)
+			defense.GET("/ids/alerts/:id", r.defenseHandler.GetIDSAlertDetail)
+			defense.PUT("/ids/alerts/:id", r.defenseHandler.UpdateIDSAlertStatus)
+			defense.DELETE("/ids/alerts/:id", r.defenseHandler.DeleteIDSAlert)
+			defense.POST("/ids/alerts/batch-delete", r.defenseHandler.BatchDeleteIDSAlerts)
+			defense.GET("/ids/alerts/stats", r.defenseHandler.GetIDSAlertsStats)
+
+			// IDS规则管理
+			defense.POST("/ids/rules", r.idsRulesHandler.CreateIDSRule)
+			defense.GET("/ids/rules", r.idsRulesHandler.GetIDSRules)
+			defense.GET("/ids/rules/:id", r.idsRulesHandler.GetIDSRule)
+			defense.PUT("/ids/rules/:id", r.idsRulesHandler.UpdateIDSRule)
+			defense.DELETE("/ids/rules/:id", r.idsRulesHandler.DeleteIDSRule)
+			defense.POST("/ids/rules/:id/toggle", r.idsRulesHandler.ToggleIDSRule)
+			defense.GET("/ids/rules/types", r.idsRulesHandler.GetIDSRuleTypes)
+			defense.GET("/ids/rules/stats", r.idsRulesHandler.GetIDSRuleStats)
+			defense.PUT("/ids/rules/batch", r.idsRulesHandler.BatchUpdateIDSRules)
+			defense.GET("/ids/rules/export", r.idsRulesHandler.ExportIDSRules)
+			defense.POST("/ids/rules/import", r.idsRulesHandler.ImportIDSRules)
 		}
 
 		// 统计数据

@@ -29,13 +29,16 @@ func NewFuzzer(manager *AttackManager) *Fuzzer {
 
 // FuzzConfig Fuzzing 配置
 type FuzzConfig struct {
-	Target       string
-	Port         int
-	Protocol     string
-	Template     []byte
-	Iterations   int
-	MutationRate float64
-	Timeout      time.Duration
+	Target           string
+	Port             int
+	Protocol         string
+	Template         []byte
+	Iterations       int
+	MutationRate     float64
+	MutationStrategy string
+	Timeout          time.Duration
+	Concurrency      int
+	AnomalyDetection []string
 }
 
 // FuzzResult Fuzzing 结果
@@ -63,7 +66,7 @@ func (f *Fuzzer) Fuzz(ctx context.Context, config *FuzzConfig) ([]*FuzzResult, e
 			return results, ctx.Err()
 		default:
 			// 生成变异后的 payload
-			mutatedPayload := f.mutate(config.Template, config.MutationRate)
+			mutatedPayload := f.mutateWithStrategy(config.Template, config.MutationRate, config.MutationStrategy)
 
 			// 发送并接收响应
 			result := &FuzzResult{
@@ -80,7 +83,7 @@ func (f *Fuzzer) Fuzz(ctx context.Context, config *FuzzConfig) ([]*FuzzResult, e
 				result.Anomaly = true
 			} else {
 				result.Response = response
-				result.Anomaly = f.detectAnomaly(response, result.ResponseTime)
+				result.Anomaly = f.detectAnomalyWithConfig(response, result.ResponseTime, config.AnomalyDetection)
 			}
 
 			results = append(results, result)
@@ -102,7 +105,134 @@ func (f *Fuzzer) Fuzz(ctx context.Context, config *FuzzConfig) ([]*FuzzResult, e
 	return results, nil
 }
 
-// mutate 变异数据
+// mutateWithStrategy 根据策略变异数据
+func (f *Fuzzer) mutateWithStrategy(data []byte, rate float64, strategy string) []byte {
+	switch strategy {
+	case "bitflip":
+		return f.mutateBitFlip(data, rate)
+	case "byteflip":
+		return f.mutateByteFlip(data, rate)
+	case "boundary":
+		return f.mutateBoundary(data, rate)
+	case "random":
+		return f.mutateRandom(data, rate)
+	case "smart":
+		fallthrough
+	default:
+		return f.mutateSmart(data, rate)
+	}
+}
+
+// mutateBitFlip 位翻转变异
+func (f *Fuzzer) mutateBitFlip(data []byte, rate float64) []byte {
+	mutated := make([]byte, len(data))
+	copy(mutated, data)
+
+	for i := range mutated {
+		if f.rand.Float64() < rate {
+			// 翻转随机位
+			bitPos := uint(f.rand.Intn(8))
+			mutated[i] ^= byte(1 << bitPos)
+		}
+	}
+	return mutated
+}
+
+// mutateByteFlip 字节翻转变异
+func (f *Fuzzer) mutateByteFlip(data []byte, rate float64) []byte {
+	mutated := make([]byte, len(data))
+	copy(mutated, data)
+
+	for i := range mutated {
+		if f.rand.Float64() < rate {
+			// 翻转整个字节
+			mutated[i] = ^mutated[i]
+		}
+	}
+	return mutated
+}
+
+// mutateBoundary 边界值变异
+func (f *Fuzzer) mutateBoundary(data []byte, rate float64) []byte {
+	mutated := make([]byte, len(data))
+	copy(mutated, data)
+
+	boundaryValues := []byte{0x00, 0x01, 0x7F, 0x80, 0xFF}
+	for i := range mutated {
+		if f.rand.Float64() < rate {
+			mutated[i] = boundaryValues[f.rand.Intn(len(boundaryValues))]
+		}
+	}
+	return mutated
+}
+
+// mutateRandom 随机变异
+func (f *Fuzzer) mutateRandom(data []byte, rate float64) []byte {
+	mutated := make([]byte, len(data))
+	copy(mutated, data)
+
+	for i := range mutated {
+		if f.rand.Float64() < rate {
+			mutated[i] = byte(f.rand.Intn(256))
+		}
+	}
+	return mutated
+}
+
+// mutateSmart 智能变异（混合策略）
+func (f *Fuzzer) mutateSmart(data []byte, rate float64) []byte {
+	mutated := make([]byte, len(data))
+	copy(mutated, data)
+
+	for i := range mutated {
+		if f.rand.Float64() < rate {
+			// 随机选择变异策略
+			strategy := f.rand.Intn(5)
+			switch strategy {
+			case 0: // 位翻转
+				mutated[i] ^= byte(1 << uint(f.rand.Intn(8)))
+			case 1: // 随机字节
+				mutated[i] = byte(f.rand.Intn(256))
+			case 2: // 边界值
+				mutated[i] = []byte{0x00, 0xFF, 0x7F, 0x80}[f.rand.Intn(4)]
+			case 3: // 增加
+				mutated[i]++
+			case 4: // 减少
+				mutated[i]--
+			}
+		}
+	}
+
+	// 随机长度变异
+	if f.rand.Float64() < 0.1 {
+		action := f.rand.Intn(3)
+		switch action {
+		case 0: // 插入字节
+			if len(mutated) > 0 {
+				pos := f.rand.Intn(len(mutated))
+				newByte := byte(f.rand.Intn(256))
+				mutated = append(mutated[:pos], append([]byte{newByte}, mutated[pos:]...)...)
+			}
+		case 1: // 删除字节
+			if len(mutated) > 1 {
+				pos := f.rand.Intn(len(mutated))
+				mutated = append(mutated[:pos], mutated[pos+1:]...)
+			}
+		case 2: // 重复字节
+			if len(mutated) > 0 {
+				pos := f.rand.Intn(len(mutated))
+				repeat := f.rand.Intn(10) + 1
+				for i := 0; i < repeat; i++ {
+					mutated = append(mutated[:pos], append([]byte{mutated[pos]}, mutated[pos:]...)...)
+				}
+			}
+		}
+	}
+
+	return mutated
+}
+
+// mutate 变异数据（保留用于兼容性）
 func (f *Fuzzer) mutate(data []byte, rate float64) []byte {
 	mutated := make([]byte, len(data))
 	copy(mutated, data)
@@ -284,7 +414,44 @@ func (f *Fuzzer) sendHTTP(host string, port int, payload []byte, timeout time.Du
 	return response, nil
 }
 
-// detectAnomaly 检测异常
+// detectAnomalyWithConfig 根据配置检测异常
+func (f *Fuzzer) detectAnomalyWithConfig(response []byte, responseTime time.Duration, detectionConfig []string) bool {
+	for _, check := range detectionConfig {
+		switch check {
+		case "timeout":
+			// 响应时间过长
+			if responseTime > 5*time.Second {
+				return true
+			}
+		case "error":
+			// 响应包含错误标识
+			errorKeywords := []string{"error", "exception", "crash", "fault"}
+			responseStr := string(response)
+			for _, keyword := range errorKeywords {
+				if contains(responseStr, keyword) {
+					return true
+				}
+			}
+		case "crash":
+			// 响应为空可能表示崩溃
+			if len(response) == 0 {
+				return true
+			}
+		case "memory":
+			// 检测内存相关错误
+			memoryKeywords := []string{"memory", "overflow", "segmentation", "heap"}
+			responseStr := string(response)
+			for _, keyword := range memoryKeywords {
+				if contains(responseStr, keyword) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// detectAnomaly 检测异常（保留用于兼容性）
 func (f *Fuzzer) detectAnomaly(response []byte, responseTime time.Duration) bool {
 	// 简单的异常检测逻辑
 	// 1. 响应时间过长
