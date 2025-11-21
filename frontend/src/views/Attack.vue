@@ -70,6 +70,7 @@
                       placeholder="协议过滤"
                       clearable
                       style="width: 150px"
+                      @change="updateFilteredPacketCount"
                     >
                       <el-option label="全部协议" value="" />
                       <el-option label="TCP" value="TCP" />
@@ -83,12 +84,16 @@
                       placeholder="源地址过滤"
                       clearable
                       style="width: 180px"
+                      @input="updateFilteredPacketCount"
+                      @clear="updateFilteredPacketCount"
                     />
                     <el-input
                       v-model="replayForm.dstAddrFilter"
                       placeholder="目标地址过滤"
                       clearable
                       style="width: 180px"
+                      @input="updateFilteredPacketCount"
+                      @clear="updateFilteredPacketCount"
                     />
                   </el-space>
                   <div style="margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary)">
@@ -649,16 +654,28 @@
                   </el-descriptions-item>
                 </el-descriptions>
 
-                <el-divider>最近告警</el-divider>
+                <el-divider>
+                  <span>最近告警</span>
+                  <el-button
+                    v-if="currentIDSTask && currentIDSTask.alertsCount > 0"
+                    size="small"
+                    type="primary"
+                    link
+                    @click="showAllAlerts"
+                    style="margin-left: 10px"
+                  >
+                    查看全部 ({{ currentIDSTask.alertsCount }})
+                  </el-button>
+                </el-divider>
 
                 <el-timeline v-if="getRecentAlerts(currentIDSTask).length > 0">
                   <el-timeline-item
                     v-for="(alert, index) in getRecentAlerts(currentIDSTask).slice(0, 5)"
                     :key="index"
                     :timestamp="formatTime(alert.timestamp)"
-                    :type="alert.severity === 'high' ? 'danger' : alert.severity === 'medium' ? 'warning' : 'info'"
+                    :type="getSeverityType(alert.severity)"
                   >
-                    <strong>{{ alert.type }}</strong>: {{ alert.description }}
+                    <strong>{{ getAlertTypeText(alert.type) }}</strong>: {{ alert.description }}
                     <br />
                     <span style="font-size: 12px; color: var(--el-text-color-secondary)">
                       来源: {{ alert.source }}
@@ -696,6 +713,7 @@
                   <el-option label="全部" value="" />
                   <el-option label="数据包重放" value="replay" />
                   <el-option label="Fuzzing" value="fuzzing" />
+                  <el-option label="入侵检测" value="ids" />
                 </el-select>
                 <el-select
                   v-model="historyFilter.status"
@@ -726,14 +744,17 @@
             <el-table-column prop="id" label="ID" width="70" />
             <el-table-column prop="type" label="类型" width="120">
               <template #default="{ row }">
-                <el-tag :type="row.type === 'replay' ? 'primary' : 'success'" size="small">
-                  {{ row.type === 'replay' ? '数据包重放' : 'Fuzzing' }}
+                <el-tag 
+                  :type="row.type === 'replay' ? 'primary' : row.type === 'fuzzing' ? 'success' : 'warning'" 
+                  size="small"
+                >
+                  {{ row.type === 'replay' ? '数据包重放' : row.type === 'fuzzing' ? 'Fuzzing' : '入侵检测' }}
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column label="目标" min-width="180">
               <template #default="{ row }">
-                {{ row.type === 'replay' ? getSessionName(row) : getTargetDisplay(row) }}
+                {{ row.type === 'replay' ? getSessionName(row) : row.type === 'ids' ? getIDSTarget(row) : getTargetDisplay(row) }}
               </template>
             </el-table-column>
             <el-table-column prop="status" label="状态" width="100">
@@ -1040,6 +1061,114 @@
         <el-button type="primary" @click="applyCustomPayload">应用</el-button>
       </template>
     </el-dialog>
+
+    <!-- 全部告警弹窗 -->
+    <el-dialog
+      v-model="allAlertsVisible"
+      title="全部告警"
+      width="80%"
+      :close-on-click-modal="false"
+    >
+      <div style="margin-bottom: 15px">
+        <el-space wrap>
+          <el-select v-model="alertFilter.type" placeholder="告警类型" clearable style="width: 150px" @change="loadAllAlerts">
+            <el-option label="全部" value="" />
+            <el-option label="端口扫描" value="port_scan" />
+            <el-option label="DoS 攻击" value="dos" />
+            <el-option label="暴力破解" value="brute_force" />
+            <el-option label="SQL 注入" value="sql_injection" />
+            <el-option label="XSS 攻击" value="xss" />
+          </el-select>
+
+          <el-select v-model="alertFilter.severity" placeholder="严重程度" clearable style="width: 120px" @change="loadAllAlerts">
+            <el-option label="全部" value="" />
+            <el-option label="低" value="low" />
+            <el-option label="中" value="medium" />
+            <el-option label="高" value="high" />
+            <el-option label="严重" value="critical" />
+          </el-select>
+
+          <el-select v-model="alertFilter.status" placeholder="状态" clearable style="width: 120px" @change="loadAllAlerts">
+            <el-option label="全部" value="" />
+            <el-option label="新告警" value="new" />
+            <el-option label="已确认" value="acknowledged" />
+            <el-option label="已解决" value="resolved" />
+            <el-option label="已忽略" value="ignored" />
+          </el-select>
+
+          <el-button type="primary" :icon="Refresh" @click="loadAllAlerts">刷新</el-button>
+        </el-space>
+      </div>
+
+      <el-table :data="allAlerts" v-loading="alertsLoading" max-height="500">
+        <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column label="类型" width="120">
+          <template #default="{ row }">
+            <el-tag size="small">{{ getAlertTypeText(row.type) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="严重程度" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getSeverityTagType(row.severity)" size="small">
+              {{ getSeverityText(row.severity) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="描述" min-width="200" />
+        <el-table-column prop="source" label="来源" width="140" />
+        <el-table-column prop="destination" label="目标" width="140" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="getStatusTagType(row.status)" size="small">
+              {{ getStatusText2(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="timestamp" label="时间" width="160">
+          <template #default="{ row }">
+            {{ formatTime(row.timestamp) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'new'"
+              size="small"
+              type="primary"
+              link
+              @click="acknowledgeAlert(row)"
+            >
+              确认
+            </el-button>
+            <el-button
+              v-if="row.status === 'acknowledged'"
+              size="small"
+              type="success"
+              link
+              @click="resolveAlert(row)"
+            >
+              解决
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div style="margin-top: 15px; text-align: right">
+        <el-pagination
+          v-model:current-page="alertPagination.page"
+          v-model:page-size="alertPagination.pageSize"
+          :total="alertPagination.total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="loadAllAlerts"
+          @size-change="loadAllAlerts"
+        />
+      </div>
+
+      <template #footer>
+        <el-button @click="allAlertsVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1140,6 +1269,21 @@ const previewVisible = ref(false)
 const previewLoading = ref(false)
 const showPayloadEditor = ref(false)
 
+// 告警管理
+const allAlertsVisible = ref(false)
+const allAlerts = ref([])
+const alertsLoading = ref(false)
+const alertFilter = ref({
+  type: '',
+  severity: '',
+  status: ''
+})
+const alertPagination = ref({
+  page: 1,
+  pageSize: 20,
+  total: 0
+})
+
 // 预览数据
 const previewPackets = ref([])
 const totalPacketCount = ref(0)
@@ -1200,13 +1344,23 @@ const loadInterfaces = async () => {
 const loadTasks = async () => {
   tasksLoading.value = true
   try {
-    const res = await axios.get('/api/attack/tasks')
-    // 标准响应格式: {success: true, data: {tasks: [...]}, meta: {...}}
-    const taskList = res.data.data.tasks || []
-
-    allTasks.value = taskList
-    replayTasks.value = taskList.filter(t => t.type === 'replay')
-    fuzzTasks.value = taskList.filter(t => t.type === 'fuzzing')
+    // 并行加载攻击任务和IDS任务
+    const [attackRes, idsRes] = await Promise.all([
+      axios.get('/api/attack/tasks'),
+      axios.get('/api/defense/ids/tasks')
+    ])
+    
+    // 攻击任务
+    const attackTasks = attackRes.data.data.tasks || []
+    // IDS任务
+    const idsTaskList = idsRes.data.data.tasks || []
+    
+    // 合并所有任务
+    allTasks.value = [...attackTasks, ...idsTaskList]
+    replayTasks.value = attackTasks.filter(t => t.type === 'replay')
+    fuzzTasks.value = attackTasks.filter(t => t.type === 'fuzzing')
+    // 更新IDS任务列表
+    idsTasks.value = idsTaskList
 
     // 更新当前任务
     const runningReplay = replayTasks.value.find(t => t.status === 'running')
@@ -1238,6 +1392,27 @@ const onSessionChange = async () => {
   }
 }
 
+// 更新过滤后的数据包数量
+const updateFilteredPacketCount = async () => {
+  if (!replayForm.value.sessionId) return
+
+  try {
+    const params = {
+      page: 1,
+      page_size: 1
+    }
+
+    if (replayForm.value.protocolFilter) params.protocol = replayForm.value.protocolFilter
+    if (replayForm.value.srcAddrFilter) params.src_addr = replayForm.value.srcAddrFilter
+    if (replayForm.value.dstAddrFilter) params.dst_addr = replayForm.value.dstAddrFilter
+
+    const res = await axios.get(`/api/capture/sessions/${replayForm.value.sessionId}/packets`, { params })
+    filteredPacketCount.value = res.data.meta?.total || 0
+  } catch (error) {
+    console.error('更新过滤数据包数量失败:', error)
+  }
+}
+
 // 预览数据包
 const showPreview = async () => {
   if (!replayForm.value.sessionId) return
@@ -1252,8 +1427,8 @@ const showPreview = async () => {
     }
 
     if (replayForm.value.protocolFilter) params.protocol = replayForm.value.protocolFilter
-    if (replayForm.value.srcAddrFilter) params.srcAddr = replayForm.value.srcAddrFilter
-    if (replayForm.value.dstAddrFilter) params.dstAddr = replayForm.value.dstAddrFilter
+    if (replayForm.value.srcAddrFilter) params.src_addr = replayForm.value.srcAddrFilter
+    if (replayForm.value.dstAddrFilter) params.dst_addr = replayForm.value.dstAddrFilter
 
     const res = await axios.get(`/api/capture/sessions/${replayForm.value.sessionId}/packets`, { params })
     // 标准响应格式: {success: true, data: {packets: [...]}, meta: {total: ...}}
@@ -1496,7 +1671,8 @@ const startIDS = async () => {
     const res = await axios.post('/api/defense/ids/start', payload)
 
     ElMessage.success('入侵检测已启动')
-    currentIDSTask.value = res.data.data
+    // 修复：正确获取 task 对象
+    currentIDSTask.value = res.data.data.task
     await loadIDSTasks()
   } catch (error) {
     ElMessage.error('启动 IDS 失败: ' + (error.response?.data?.error || error.message))
@@ -1525,8 +1701,22 @@ const loadIDSTasks = async () => {
     const res = await axios.get('/api/defense/ids/tasks')
     // 标准响应格式: {success: true, data: {tasks: [...]}, meta: {...}}
     idsTasks.value = res.data.data.tasks || []
-    const running = idsTasks.value.find(t => t.status === 'running')
-    currentIDSTask.value = running || null
+
+    // 修复：如果当前有任务，更新它的数据；否则查找运行中的任务
+    if (currentIDSTask.value) {
+      // 更新当前任务的数据
+      const updated = idsTasks.value.find(t => t.id === currentIDSTask.value.id)
+      if (updated) {
+        currentIDSTask.value = updated
+      } else {
+        // 任务不存在了，清空
+        currentIDSTask.value = null
+      }
+    } else {
+      // 没有当前任务，查找运行中的任务
+      const running = idsTasks.value.find(t => t.status === 'running')
+      currentIDSTask.value = running || null
+    }
   } catch (error) {
     console.error('加载 IDS 任务失败:', error)
   }
@@ -1584,6 +1774,136 @@ const getRecentAlerts = (task) => {
   return []
 }
 
+// 显示全部告警
+const showAllAlerts = () => {
+  allAlertsVisible.value = true
+  loadAllAlerts()
+}
+
+// 加载全部告警
+const loadAllAlerts = async () => {
+  if (!currentIDSTask.value) return
+
+  alertsLoading.value = true
+  try {
+    const params = {
+      task_id: currentIDSTask.value.id,
+      page: alertPagination.value.page,
+      page_size: alertPagination.value.pageSize
+    }
+
+    if (alertFilter.value.type) params.type = alertFilter.value.type
+    if (alertFilter.value.severity) params.severity = alertFilter.value.severity
+    if (alertFilter.value.status) params.status = alertFilter.value.status
+
+    const res = await axios.get('/api/defense/ids/alerts', { params })
+    allAlerts.value = res.data.data.alerts || []
+    alertPagination.value.total = res.data.meta.total || 0
+  } catch (error) {
+    console.error('Failed to load alerts:', error)
+    ElMessage.error('加载告警失败')
+  } finally {
+    alertsLoading.value = false
+  }
+}
+
+// 确认告警
+const acknowledgeAlert = async (alert) => {
+  try {
+    await axios.put(`/api/defense/ids/alerts/${alert.id}`, {
+      status: 'acknowledged',
+      acknowledgedBy: 'admin'
+    })
+    ElMessage.success('告警已确认')
+    loadAllAlerts()
+  } catch (error) {
+    console.error('Failed to acknowledge alert:', error)
+    ElMessage.error('确认告警失败')
+  }
+}
+
+// 解决告警
+const resolveAlert = async (alert) => {
+  try {
+    await axios.put(`/api/defense/ids/alerts/${alert.id}`, {
+      status: 'resolved',
+      resolvedBy: 'admin'
+    })
+    ElMessage.success('告警已解决')
+    loadAllAlerts()
+  } catch (error) {
+    console.error('Failed to resolve alert:', error)
+    ElMessage.error('解决告警失败')
+  }
+}
+
+// 获取告警类型文本
+const getAlertTypeText = (type) => {
+  const typeMap = {
+    port_scan: '端口扫描',
+    dos: 'DoS 攻击',
+    brute_force: '暴力破解',
+    sql_injection: 'SQL 注入',
+    xss: 'XSS 攻击'
+  }
+  return typeMap[type] || type
+}
+
+// 获取严重程度文本
+const getSeverityText = (severity) => {
+  const severityMap = {
+    low: '低',
+    medium: '中',
+    high: '高',
+    critical: '严重'
+  }
+  return severityMap[severity] || severity
+}
+
+// 获取严重程度标签类型
+const getSeverityTagType = (severity) => {
+  const typeMap = {
+    low: 'info',
+    medium: 'warning',
+    high: 'danger',
+    critical: 'danger'
+  }
+  return typeMap[severity] || 'info'
+}
+
+// 获取严重程度时间线类型
+const getSeverityType = (severity) => {
+  const typeMap = {
+    low: 'info',
+    medium: 'warning',
+    high: 'danger',
+    critical: 'danger'
+  }
+  return typeMap[severity] || 'info'
+}
+
+// 获取状态文本
+const getStatusText2 = (status) => {
+  const statusMap = {
+    new: '新告警',
+    acknowledged: '已确认',
+    resolved: '已解决',
+    ignored: '已忽略'
+  }
+  return statusMap[status] || status
+}
+
+// 获取状态标签类型
+const getStatusTagType = (status) => {
+  const typeMap = {
+    new: 'danger',
+    acknowledged: 'warning',
+    resolved: 'success',
+    ignored: 'info'
+  }
+  return typeMap[status] || 'info'
+}
+
 // 停止 Fuzzing
 const stopFuzzing = async () => {
   if (!currentFuzzTask.value) return
@@ -1619,17 +1939,31 @@ const viewTaskDetail = (task) => {
 // 删除任务
 const deleteTask = async (taskId) => {
   try {
+    // 找到任务类型
+    const task = allTasks.value.find(t => t.id === taskId)
+    if (!task) {
+      ElMessage.error('任务不存在')
+      return
+    }
+
     await ElMessageBox.confirm('确认删除此任务？删除后无法恢复。', '确认删除', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning'
     })
 
-    await axios.delete(`/api/attack/tasks/${taskId}`)
+    // 根据任务类型调用不同的API
+    if (task.type === 'ids') {
+      await axios.delete(`/api/defense/ids/tasks/${taskId}`)
+    } else {
+      await axios.delete(`/api/attack/tasks/${taskId}`)
+    }
+    
     ElMessage.success('删除成功')
     await loadTasks()
   } catch (error) {
     if (error !== 'cancel') {
+      console.error('删除任务失败:', error)
       ElMessage.error('删除失败: ' + (error.response?.data?.error || error.message))
     }
   }
@@ -1660,8 +1994,17 @@ const deleteCurrentTask = async () => {
 // 清空历史
 const clearHistory = async () => {
   try {
+    const tasksToDelete = allTasks.value.filter(
+      t => t.status === 'completed' || t.status === 'failed' || t.status === 'stopped'
+    )
+
+    if (tasksToDelete.length === 0) {
+      ElMessage.info('没有可清空的历史任务')
+      return
+    }
+
     await ElMessageBox.confirm(
-      '确认清空所有已完成、已失败和已停止的任务？此操作无法恢复。',
+      `确认清空 ${tasksToDelete.length} 个已完成、已失败和已停止的任务？此操作无法恢复。`,
       '确认清空',
       {
         confirmButtonText: '确认',
@@ -1670,19 +2013,65 @@ const clearHistory = async () => {
       }
     )
 
-    const tasksToDelete = allTasks.value.filter(
-      t => t.status === 'completed' || t.status === 'failed' || t.status === 'stopped'
-    )
-
-    for (const task of tasksToDelete) {
-      await axios.delete(`/api/attack/tasks/${task.id}`)
+    // 按任务类型分组
+    const attackTasks = tasksToDelete.filter(t => t.type !== 'ids')
+    const idsTasks = tasksToDelete.filter(t => t.type === 'ids')
+    
+    console.log('准备清空的任务:', {
+      attack: attackTasks.length,
+      ids: idsTasks.length,
+      total: tasksToDelete.length
+    })
+    
+    let deletedCount = 0
+    const batchSize = 1000
+    
+    // 删除攻击任务
+    if (attackTasks.length > 0) {
+      const attackTaskIds = attackTasks.map(task => task.id)
+      for (let i = 0; i < attackTaskIds.length; i += batchSize) {
+        const batchIds = attackTaskIds.slice(i, i + batchSize)
+        try {
+          await axios.post('/api/attack/tasks/batch-delete', {
+            task_ids: batchIds
+          })
+          deletedCount += batchIds.length
+          if (tasksToDelete.length > batchSize) {
+            ElMessage.info(`清空进度: ${deletedCount}/${tasksToDelete.length}`)
+          }
+        } catch (err) {
+          console.error('批量删除攻击任务失败:', err.response?.data || err.message)
+          throw err
+        }
+      }
+    }
+    
+    // 删除IDS任务
+    if (idsTasks.length > 0) {
+      const idsTaskIds = idsTasks.map(task => task.id)
+      for (let i = 0; i < idsTaskIds.length; i += batchSize) {
+        const batchIds = idsTaskIds.slice(i, i + batchSize)
+        try {
+          await axios.post('/api/defense/ids/tasks/batch-delete', {
+            task_ids: batchIds
+          })
+          deletedCount += batchIds.length
+          if (tasksToDelete.length > batchSize) {
+            ElMessage.info(`清空进度: ${deletedCount}/${tasksToDelete.length}`)
+          }
+        } catch (err) {
+          console.error('批量删除IDS任务失败:', err.response?.data || err.message)
+          throw err
+        }
+      }
     }
 
-    ElMessage.success(`已清空 ${tasksToDelete.length} 个任务`)
+    ElMessage.success(`已清空 ${deletedCount} 个任务`)
     await loadTasks()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('清空失败')
+      console.error('清空历史失败:', error)
+      ElMessage.error('清空失败: ' + (error.response?.data?.error || error.message))
     }
   }
 }
@@ -1722,6 +2111,11 @@ const getTargetDisplay = (task) => {
   return task.target || 'N/A'
 }
 
+// 获取IDS任务目标显示
+const getIDSTarget = (task) => {
+  return task.interface || 'N/A'
+}
+
 // 获取异常数量
 const getAnomalyCount = (task) => {
   if (task.result && task.result.anomalies !== undefined) {
@@ -1740,28 +2134,75 @@ const calculateSuccessRate = (result) => {
 // 格式化参数键
 const formatParamKey = (key) => {
   const keyMap = {
+    // 基础参数
     'sessionId': '会话 ID',
+    'session_id': '会话 ID',
     'sessionName': '会话名称',
+    'session_name': '会话名称',
     'interface': '网络接口',
     'speedMultiplier': '速度倍率',
+    'speed_multiplier': '速度倍率',
     'mode': '重放模式',
     'loopCount': '循环次数',
+    'loop_count': '循环次数',
     'packetCount': '数据包数量',
+    'packet_count': '数据包数量',
+    
+    // 重放参数
+    'duration': '持续时间(秒)',
+    'protocolFilter': '协议过滤',
+    'protocol_filter': '协议过滤',
+    'srcAddrFilter': '源地址过滤',
+    'src_addr_filter': '源地址过滤',
+    'dstAddrFilter': '目标地址过滤',
+    'dst_addr_filter': '目标地址过滤',
+    'preserveTimestamp': '保留时间戳',
+    'preserve_timestamp': '保留时间戳',
+    'modifyChecksum': '修正校验和',
+    'modify_checksum': '修正校验和',
+    
+    // Fuzzing参数
     'target': '目标地址',
     'port': '端口',
     'protocol': '协议',
     'template': '模板',
     'iterations': '迭代次数',
     'mutationRate': '变异率',
-    'timeout': '超时时间'
+    'mutation_rate': '变异率',
+    'mutationStrategy': '变异策略',
+    'mutation_strategy': '变异策略',
+    'timeout': '超时时间(秒)',
+    'concurrency': '并发数',
+    'anomalyDetection': '异常检测',
+    'anomaly_detection': '异常检测'
   }
   return keyMap[key] || key
 }
 
 // 格式化参数值
 const formatParamValue = (value) => {
-  if (value === null || value === undefined) return 'N/A'
-  if (typeof value === 'object') return JSON.stringify(value)
+  if (value === null || value === undefined || value === '') return '-'
+  
+  // 处理布尔值
+  if (typeof value === 'boolean') {
+    return value ? '是' : '否'
+  }
+  
+  // 处理数组
+  if (Array.isArray(value)) {
+    return value.join(', ')
+  }
+  
+  // 处理对象
+  if (typeof value === 'object') {
+    return JSON.stringify(value, null, 2)
+  }
+  
+  // 处理数字
+  if (typeof value === 'number') {
+    return value.toString()
+  }
+  
   return String(value)
 }
 

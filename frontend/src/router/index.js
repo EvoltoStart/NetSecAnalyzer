@@ -50,6 +50,12 @@ const router = createRouter({
           name: 'Attack',
           component: () => import('@/views/Attack.vue'),
           meta: { title: '攻防模拟' }
+        },
+        {
+          path: 'ids-alerts',
+          name: 'IDSAlerts',
+          component: () => import('@/views/IDSAlerts.vue'),
+          meta: { title: 'IDS 告警管理' }
         }
       ]
     }

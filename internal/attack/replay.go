@@ -30,27 +30,108 @@ type ReplayResult struct {
 	FailedCount int
 }
 
+// ReplayConfig 重放配置
+type ReplayConfig struct {
+	Interface         string
+	SpeedMultiplier   float64
+	Mode              string // once, loop, continuous
+	LoopCount         int
+	Duration          int // 持续时间（秒）
+	PreserveTimestamp bool
+	ModifyChecksum    bool
+}
+
 // ReplayPackets 重放数据包
-func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, iface string, speedMultiplier float64) (*ReplayResult, error) {
+func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, config *ReplayConfig) (*ReplayResult, error) {
 	if len(packets) == 0 {
 		return nil, fmt.Errorf("no packets to replay")
 	}
 
-	logger.GetLogger().Infof("Starting packet replay: %d packets on interface %s", len(packets), iface)
+	logger.GetLogger().Infof("Starting packet replay: %d packets on interface %s, mode: %s", len(packets), config.Interface, config.Mode)
 
 	// 打开网络接口进行发送
-	handle, err := pcap.OpenLive(iface, 65536, true, pcap.BlockForever)
+	handle, err := pcap.OpenLive(config.Interface, 65536, true, pcap.BlockForever)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open interface: %w", err)
 	}
 	defer handle.Close()
 
-	startTime := packets[0].Timestamp
-	replayStartTime := time.Now()
 	result := &ReplayResult{
 		SentCount:   0,
 		FailedCount: 0,
 	}
+
+	// 根据重放模式执行不同的逻辑
+	switch config.Mode {
+	case "once":
+		return r.replayOnce(ctx, handle, packets, config, result)
+	case "loop":
+		return r.replayLoop(ctx, handle, packets, config, result)
+	case "continuous":
+		return r.replayContinuous(ctx, handle, packets, config, result)
+	default:
+		return r.replayOnce(ctx, handle, packets, config, result)
+	}
+}
+
+// replayOnce 单次重放
+func (r *Replayer) replayOnce(ctx context.Context, handle *pcap.Handle, packets []*models.Packet, config *ReplayConfig, result *ReplayResult) (*ReplayResult, error) {
+	return r.sendPackets(ctx, handle, packets, config, result)
+}
+
+// replayLoop 循环重放
+func (r *Replayer) replayLoop(ctx context.Context, handle *pcap.Handle, packets []*models.Packet, config *ReplayConfig, result *ReplayResult) (*ReplayResult, error) {
+	for i := 0; i < config.LoopCount; i++ {
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		default:
+		}
+
+		_, err := r.sendPackets(ctx, handle, packets, config, result)
+		if err != nil {
+			return result, err
+		}
+
+		logger.GetLogger().Debugf("Completed loop %d/%d", i+1, config.LoopCount)
+	}
+	return result, nil
+}
+
+// replayContinuous 持续重放
+func (r *Replayer) replayContinuous(ctx context.Context, handle *pcap.Handle, packets []*models.Packet, config *ReplayConfig, result *ReplayResult) (*ReplayResult, error) {
+	endTime := time.Now().Add(time.Duration(config.Duration) * time.Second)
+
+	for time.Now().Before(endTime) {
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		default:
+		}
+
+		_, err := r.sendPackets(ctx, handle, packets, config, result)
+		if err != nil {
+			return result, err
+		}
+
+		// 检查是否还有时间继续
+		if time.Now().After(endTime) {
+			break
+		}
+	}
+
+	logger.GetLogger().Infof("Continuous replay completed after %d seconds", config.Duration)
+	return result, nil
+}
+
+// sendPackets 发送数据包
+func (r *Replayer) sendPackets(ctx context.Context, handle *pcap.Handle, packets []*models.Packet, config *ReplayConfig, result *ReplayResult) (*ReplayResult, error) {
+	if len(packets) == 0 {
+		return result, nil
+	}
+
+	startTime := packets[0].Timestamp
+	replayStartTime := time.Now()
 
 	for i, pkt := range packets {
 		select {
@@ -59,11 +140,11 @@ func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, 
 			return result, ctx.Err()
 		default:
 			// 计算延迟
-			if i > 0 {
+			if i > 0 && !config.PreserveTimestamp {
 				// 实际应该等待的时间
 				elapsed := time.Since(replayStartTime)
 				expectedElapsed := pkt.Timestamp.Sub(startTime)
-				waitTime := time.Duration(float64(expectedElapsed)/speedMultiplier) - elapsed
+				waitTime := time.Duration(float64(expectedElapsed)/config.SpeedMultiplier) - elapsed
 
 				if waitTime > 0 {
 					time.Sleep(waitTime)
@@ -79,6 +160,11 @@ func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, 
 
 			// 使用完整的原始数据包
 			dataToSend := pkt.RawData
+
+			// 如果需要修正校验和，处理数据包
+			if config.ModifyChecksum && len(dataToSend) > 0 {
+				dataToSend = r.modifyPacketChecksum(dataToSend)
+			}
 
 			// 发送数据包
 			if err := handle.WritePacketData(dataToSend); err != nil {
@@ -96,6 +182,27 @@ func (r *Replayer) ReplayPackets(ctx context.Context, packets []*models.Packet, 
 
 	logger.GetLogger().Infof("Packet replay completed (sent: %d, failed: %d)", result.SentCount, result.FailedCount)
 	return result, nil
+}
+
+// modifyPacketChecksum 修正数据包校验和
+func (r *Replayer) modifyPacketChecksum(data []byte) []byte {
+	// 解析数据包
+	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
+
+	// 创建新的数据包缓冲区
+	buffer := gopacket.NewSerializeBuffer()
+	options := gopacket.SerializeOptions{
+		ComputeChecksums: true, // 自动计算校验和
+		FixLengths:       true, // 自动修正长度字段
+	}
+
+	// 重新序列化数据包，这会自动计算校验和
+	if err := gopacket.SerializePacket(buffer, options, packet); err != nil {
+		logger.GetLogger().Warnf("Failed to recompute checksums: %v", err)
+		return data // 返回原始数据
+	}
+
+	return buffer.Bytes()
 }
 
 // ReplayFromPCAP 从 PCAP 文件重放

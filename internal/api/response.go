@@ -79,8 +79,8 @@ func CalculateMeta(total int64, page, pageSize int) *Meta {
 
 // PaginationParams 分页参数结构
 type PaginationParams struct {
-	Page     int `form:"page" binding:"omitempty,min=1"`              // 页码（默认 1）
-	PageSize int `form:"page_size" binding:"omitempty,min=1,max=100"` // 每页大小（默认 20，最大 100）
+	Page     int `form:"page" binding:"omitempty,min=1"`                  // 页码（默认 1）
+	PageSize int `form:"page_size" binding:"omitempty,min=1,max=1000000"` // 每页大小（默认 20，最大 1000000）
 }
 
 // GetPaginationParams 从请求中获取分页参数

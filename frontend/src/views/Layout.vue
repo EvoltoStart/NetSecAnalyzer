@@ -30,6 +30,10 @@
           <el-icon><Lightning /></el-icon>
           <span>攻防模拟</span>
         </el-menu-item>
+        <el-menu-item index="/ids-alerts">
+          <el-icon><Warning /></el-icon>
+          <span>IDS 告警</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -57,7 +61,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { RefreshRight } from '@element-plus/icons-vue'
+import { RefreshRight, Warning } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
