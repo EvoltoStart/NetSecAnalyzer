@@ -11,7 +11,9 @@ type DoSDetector struct {
 	sensitivity int
 	// 记录每个源 IP 的请求频率
 	requestHistory map[string]*RequestRecord
-	mu             sync.RWMutex
+	// 记录最近的告警时间（用于去重）
+	lastAlertTime map[string]time.Time
+	mu            sync.RWMutex
 }
 
 // RequestRecord 请求记录
@@ -26,6 +28,7 @@ func NewDoSDetector(sensitivity int) *DoSDetector {
 	detector := &DoSDetector{
 		sensitivity:    sensitivity,
 		requestHistory: make(map[string]*RequestRecord),
+		lastAlertTime:  make(map[string]time.Time),
 	}
 
 	// 启动清理协程
@@ -69,12 +72,34 @@ func (d *DoSDetector) Detect(info *PacketInfo) *Alert {
 	// 计算请求速率
 	requestCount := len(record.Timestamps)
 
-	// 根据敏感度设置阈值
-	// 敏感度越高，阈值越低
-	threshold := 100 - (d.sensitivity * 5)
+	// 根据敏感度设置阈值（改进算法）
+	// 敏感度 1-3: 宽松（100-50 req）
+	// 敏感度 4-6: 中等（50-30 req）
+	// 敏感度 7-10: 严格（30-10 req）
+	var threshold int
+	if d.sensitivity <= 3 {
+		threshold = 100 - (d.sensitivity * 10)
+	} else if d.sensitivity <= 6 {
+		threshold = 70 - (d.sensitivity * 5)
+	} else {
+		threshold = 40 - (d.sensitivity * 3)
+	}
+	// 确保阈值至少为 10
+	if threshold < 10 {
+		threshold = 10
+	}
+
+	// 检查告警去重：同一 IP 在 30 秒内只告警一次
+	if lastAlert, exists := d.lastAlertTime[info.SrcIP]; exists {
+		if info.Timestamp.Sub(lastAlert) < 30*time.Second {
+			return nil // 跳过重复告警
+		}
+	}
 
 	// 如果请求速率超过阈值，触发告警
 	if requestCount >= threshold {
+		// 记录告警时间
+		d.lastAlertTime[info.SrcIP] = info.Timestamp
 		return &Alert{
 			Type:        "dos",
 			Severity:    d.getSeverity(requestCount),
@@ -94,14 +119,27 @@ func (d *DoSDetector) Detect(info *PacketInfo) *Alert {
 	return nil
 }
 
-// getSeverity 根据请求数量确定严重程度
+// getSeverity 根据请求数量和敏感度确定严重程度
 func (d *DoSDetector) getSeverity(requestCount int) string {
-	if requestCount > 500 {
-		return "critical"
-	} else if requestCount > 200 {
-		return "high"
-	} else if requestCount > 100 {
-		return "medium"
+	// 根据敏感度调整严重程度判断
+	if d.sensitivity >= 7 {
+		// 高敏感度：更容易判定为高危
+		if requestCount > 100 {
+			return "critical"
+		} else if requestCount > 50 {
+			return "high"
+		} else if requestCount > 20 {
+			return "medium"
+		}
+	} else {
+		// 正常敏感度
+		if requestCount > 500 {
+			return "critical"
+		} else if requestCount > 200 {
+			return "high"
+		} else if requestCount > 100 {
+			return "medium"
+		}
 	}
 	return "low"
 }
@@ -123,6 +161,7 @@ func (d *DoSDetector) cleanup() {
 			// 如果记录超过 10 分钟没有更新，删除
 			if now.Sub(record.LastSeen) > 10*time.Minute {
 				delete(d.requestHistory, ip)
+				delete(d.lastAlertTime, ip)
 			}
 		}
 		d.mu.Unlock()

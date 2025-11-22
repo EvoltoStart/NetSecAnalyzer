@@ -15,14 +15,16 @@ import (
 
 // DefenseHandler 防御处理器
 type DefenseHandler struct {
-	idsInstances map[uint]*ids.IDS // 任务 ID -> IDS 实例
-	mu           sync.RWMutex
+	idsInstances   map[uint]*ids.IDS           // 任务 ID -> IDS 实例
+	idsCancelFuncs map[uint]context.CancelFunc // 任务 ID -> 取消函数
+	mu             sync.RWMutex
 }
 
 // NewDefenseHandler 创建防御处理器
 func NewDefenseHandler() *DefenseHandler {
 	return &DefenseHandler{
-		idsInstances: make(map[uint]*ids.IDS),
+		idsInstances:   make(map[uint]*ids.IDS),
+		idsCancelFuncs: make(map[uint]context.CancelFunc),
 	}
 }
 
@@ -115,8 +117,14 @@ func (h *DefenseHandler) StartIDS(c *gin.Context) {
 
 	logger.GetLogger().Infof("IDS task started: %s on interface %s with rules: %v", taskID, req.Interface, req.Rules)
 
+	// 创建可取消的 context
+	ctx, cancel := context.WithCancel(context.Background())
+	h.mu.Lock()
+	h.idsCancelFuncs[task.ID] = cancel
+	h.mu.Unlock()
+
 	// 异步执行 IDS
-	go h.runIDS(context.Background(), task, req)
+	go h.runIDS(ctx, task, req)
 
 	RespondSuccess(c, gin.H{
 		"message": "IDS started",
@@ -150,27 +158,31 @@ func (h *DefenseHandler) runIDS(ctx context.Context, task *models.DefenseTask, r
 
 	logger.GetLogger().Infof("Real IDS started for task %d on interface %s", task.ID, req.Interface)
 
-	// 定期更新任务状态
-	ticker := time.NewTicker(2 * time.Second)
+	// 定期更新任务状态（降低频率到 5 秒，减少数据库压力）
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+
+	// 清理函数
+	defer func() {
+		h.mu.Lock()
+		delete(h.idsInstances, task.ID)
+		delete(h.idsCancelFuncs, task.ID)
+		h.mu.Unlock()
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
+			logger.GetLogger().Infof("IDS task %d cancelled", task.ID)
 			idsInstance.Stop()
-			h.mu.Lock()
-			delete(h.idsInstances, task.ID)
-			h.mu.Unlock()
 			return
 		case <-ticker.C:
-			// 检查任务是否被停止
-			var currentTask models.DefenseTask
-			if err := database.GetDB().First(&currentTask, task.ID).Error; err == nil {
-				if currentTask.Status != "running" {
+			// 检查任务是否被停止（优化：只查询 status 字段）
+			var status string
+			if err := database.GetDB().Model(&models.DefenseTask{}).Select("status").Where("id = ?", task.ID).Scan(&status).Error; err == nil {
+				if status != "running" {
+					logger.GetLogger().Infof("IDS task %d stopped via database", task.ID)
 					idsInstance.Stop()
-					h.mu.Lock()
-					delete(h.idsInstances, task.ID)
-					h.mu.Unlock()
 					return
 				}
 			}
@@ -222,14 +234,18 @@ func (h *DefenseHandler) StopIDS(c *gin.Context) {
 		return
 	}
 
-	// 停止 IDS 实例
+	// 取消 context，触发 runIDS 停止
 	h.mu.Lock()
+	if cancel, exists := h.idsCancelFuncs[task.ID]; exists {
+		cancel() // 这会触发 ctx.Done()，runIDS 会自动清理
+	}
+	// 直接停止 IDS 实例（双重保险）
 	if idsInstance, exists := h.idsInstances[task.ID]; exists {
 		idsInstance.Stop()
-		delete(h.idsInstances, task.ID)
 	}
 	h.mu.Unlock()
 
+	// 更新数据库状态
 	task.Status = "stopped"
 	task.CompletedAt = timePtr(time.Now())
 	database.GetDB().Save(&task)
@@ -237,6 +253,59 @@ func (h *DefenseHandler) StopIDS(c *gin.Context) {
 	logger.GetLogger().Infof("IDS task stopped: %s", task.TaskID)
 
 	RespondSuccess(c, gin.H{"message": "IDS stopped"})
+}
+
+// UpdateIDSAutoBlock 动态更新自动阻断配置
+func (h *DefenseHandler) UpdateIDSAutoBlock(c *gin.Context) {
+	taskID := c.Param("id")
+
+	var req struct {
+		AutoBlock bool `json:"auto_block"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondBadRequest(c, err.Error())
+		return
+	}
+
+	var task models.DefenseTask
+	if err := database.GetDB().First(&task, taskID).Error; err != nil {
+		RespondNotFound(c, "Task not found")
+		return
+	}
+
+	// 检查任务是否正在运行
+	if task.Status != "running" {
+		RespondBadRequest(c, "Task is not running")
+		return
+	}
+
+	// 更新 IDS 实例的自动阻断配置
+	h.mu.RLock()
+	idsInstance, exists := h.idsInstances[task.ID]
+	h.mu.RUnlock()
+
+	if !exists {
+		RespondNotFound(c, "IDS instance not found")
+		return
+	}
+
+	// 动态更新自动阻断开关
+	idsInstance.SetAutoBlock(req.AutoBlock)
+
+	// 更新数据库中的配置
+	if task.Parameters == nil {
+		task.Parameters = models.JSON{}
+	}
+	task.Parameters["auto_block"] = req.AutoBlock
+	database.GetDB().Save(&task)
+
+	logger.GetLogger().Infof("IDS task %d auto-block updated to: %v", task.ID, req.AutoBlock)
+
+	RespondSuccess(c, gin.H{
+		"message":    "Auto-block configuration updated",
+		"auto_block": req.AutoBlock,
+	})
 }
 
 // DeleteIDSTask 删除 IDS 任务

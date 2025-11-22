@@ -563,7 +563,6 @@
                     <el-checkbox label="brute_force">暴力破解</el-checkbox>
                     <el-checkbox label="sql_injection">SQL 注入</el-checkbox>
                     <el-checkbox label="xss">XSS 攻击</el-checkbox>
-                    <el-checkbox label="malware">恶意软件</el-checkbox>
                   </el-checkbox-group>
                 </el-form-item>
 
@@ -845,8 +844,8 @@
             <el-tag>{{ currentTask.id }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="任务类型">
-            <el-tag :type="currentTask.type === 'replay' ? 'primary' : 'success'">
-              {{ currentTask.type === 'replay' ? '数据包重放' : 'Fuzzing' }}
+            <el-tag :type="currentTask.type === 'replay' ? 'primary' : currentTask.type === 'ids' ? 'warning' : 'success'">
+              {{ currentTask.type === 'replay' ? '数据包重放' : currentTask.type === 'ids' ? '入侵检测' : 'Fuzzing' }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="状态">
@@ -866,8 +865,11 @@
           <el-descriptions-item label="完成时间">
             {{ currentTask.completedAt ? formatTime(currentTask.completedAt) : '未完成' }}
           </el-descriptions-item>
-          <el-descriptions-item label="目标" :span="2">
+          <el-descriptions-item v-if="currentTask.type !== 'ids'" label="目标" :span="2">
             {{ currentTask.target }}
+          </el-descriptions-item>
+          <el-descriptions-item v-if="currentTask.type === 'ids'" label="监听接口" :span="2">
+            {{ currentTask.interface || '-' }}
           </el-descriptions-item>
         </el-descriptions>
 
@@ -958,8 +960,87 @@
           </el-descriptions>
         </div>
 
-        <!-- 参数详情 -->
-        <div v-if="currentTask.parameters">
+        <!-- IDS 任务详情 -->
+        <div v-else-if="currentTask.type === 'ids'">
+          <el-divider>检测统计</el-divider>
+
+          <el-descriptions :column="3" border style="margin-bottom: 15px">
+            <el-descriptions-item label="检测事件">
+              <el-tag type="info">{{ currentTask.eventsDetected || 0 }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="告警数量">
+              <el-tag :type="currentTask.alertsCount > 0 ? 'warning' : 'success'">
+                {{ currentTask.alertsCount || 0 }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="阻断次数">
+              <el-tag :type="currentTask.blocksCount > 0 ? 'danger' : 'info'">
+                {{ currentTask.blocksCount || 0 }}
+              </el-tag>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-divider>检测配置</el-divider>
+
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="检测模式">
+              <el-tag>{{ currentTask.parameters?.mode === 'hybrid' ? '混合模式' : currentTask.parameters?.mode === 'signature' ? '签名模式' : '行为模式' }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="自动阻断">
+              <el-tag :type="currentTask.parameters?.auto_block ? 'danger' : 'info'">
+                {{ currentTask.parameters?.auto_block ? '已启用' : '已禁用' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="敏感度">
+              {{ currentTask.parameters?.sensitivity || 5 }}
+            </el-descriptions-item>
+            <el-descriptions-item label="告警阈值">
+              {{ currentTask.parameters?.alert_threshold || 10 }}
+            </el-descriptions-item>
+            <el-descriptions-item label="检测规则" :span="2">
+              <el-space wrap>
+                <el-tag
+                  v-for="rule in currentTask.parameters?.rules || []"
+                  :key="rule"
+                  size="small"
+                  type="success"
+                >
+                  {{ formatRuleName(rule) }}
+                </el-tag>
+              </el-space>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <!-- 最近告警 -->
+          <div v-if="currentTask.recentAlerts && currentTask.recentAlerts.alerts && currentTask.recentAlerts.alerts.length > 0">
+            <el-divider>最近告警</el-divider>
+            <el-table
+              :data="currentTask.recentAlerts.alerts.slice(0, 10)"
+              max-height="300"
+              stripe
+              size="small"
+            >
+              <el-table-column prop="type" label="类型" width="120">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.severity === 'high' ? 'danger' : row.severity === 'medium' ? 'warning' : 'info'">
+                    {{ formatRuleName(row.type) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="source" label="源地址" width="140" />
+              <el-table-column prop="destination" label="目标地址" width="140" />
+              <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
+              <el-table-column prop="timestamp" label="时间" width="160">
+                <template #default="{ row }">
+                  {{ formatTime(row.timestamp) }}
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+
+        <!-- 参数详情（仅用于攻击任务） -->
+        <div v-if="currentTask.type !== 'ids' && currentTask.parameters">
           <el-divider>任务参数</el-divider>
           <el-descriptions :column="2" border>
             <el-descriptions-item
@@ -1173,7 +1254,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   VideoPlay, VideoPause, View, Refresh, Delete, Clock,
@@ -1236,7 +1317,7 @@ const fuzzTemplates = ref([])
 const idsForm = ref({
   interface: '',
   mode: 'hybrid',
-  rules: ['port_scan', 'dos', 'brute_force'],
+  rules: ['port_scan', 'dos', 'brute_force', 'sql_injection', 'xss'],  // 默认选择所有规则
   sensitivity: 5,
   alertThreshold: 10,
   autoBlock: false
@@ -1332,8 +1413,20 @@ const loadInterfaces = async () => {
   try {
     const res = await axios.get('/api/capture/interfaces')
     interfaces.value = res.data.data.interfaces || []
-    if (interfaces.value.length > 0) {
+    
+    // 只在没有保存的配置时，才设置默认值
+    if (interfaces.value.length > 0 && !replayForm.value.interface) {
       replayForm.value.interface = interfaces.value[0].name
+    }
+    
+    // 验证已保存的接口是否仍然存在
+    if (replayForm.value.interface) {
+      const exists = interfaces.value.some(i => i.name === replayForm.value.interface)
+      if (!exists && interfaces.value.length > 0) {
+        // 如果保存的接口不存在了，则使用第一个
+        replayForm.value.interface = interfaces.value[0].name
+        saveReplayConfig()
+      }
     }
   } catch (error) {
     console.error('加载网络接口失败:', error)
@@ -1355,8 +1448,10 @@ const loadTasks = async () => {
     // IDS任务
     const idsTaskList = idsRes.data.data.tasks || []
     
-    // 合并所有任务
-    allTasks.value = [...attackTasks, ...idsTaskList]
+    // 合并所有任务并按创建时间倒序排序（最新的在前）
+    allTasks.value = [...attackTasks, ...idsTaskList].sort((a, b) => {
+      return new Date(b.createdAt) - new Date(a.createdAt)
+    })
     replayTasks.value = attackTasks.filter(t => t.type === 'replay')
     fuzzTasks.value = attackTasks.filter(t => t.type === 'fuzzing')
     // 更新IDS任务列表
@@ -1456,29 +1551,55 @@ const loadFuzzTemplates = () => {
       { name: 'GET 请求', value: 'GET / HTTP/1.1\r\nHost: target\r\n\r\n' },
       { name: 'POST 请求', value: 'POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\n\r\n' },
       { name: 'PUT 请求', value: 'PUT / HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\n\r\n' },
-      { name: 'DELETE 请求', value: 'DELETE / HTTP/1.1\r\nHost: target\r\n\r\n' }
+      { name: 'DELETE 请求', value: 'DELETE / HTTP/1.1\r\nHost: target\r\n\r\n' },
+      { name: 'SQL注入测试', value: 'GET /login?user=admin\' OR \'1\'=\'1&pass=test HTTP/1.1\r\nHost: target\r\n\r\n' },
+      { name: 'XSS测试', value: 'GET /search?q=<scr' + 'ipt>alert(1)</scr' + 'ipt> HTTP/1.1\r\nHost: target\r\n\r\n' },
+      { name: '路径遍历', value: 'GET /../../../etc/passwd HTTP/1.1\r\nHost: target\r\n\r\n' },
+      { name: '命令注入', value: 'GET /cmd?exec=ls;cat /etc/passwd HTTP/1.1\r\nHost: target\r\n\r\n' }
     ],
     'Modbus': [
       { name: '读取保持寄存器', value: '\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x0A' },
       { name: '读取输入寄存器', value: '\x00\x01\x00\x00\x00\x06\x01\x04\x00\x00\x00\x0A' },
       { name: '写单个寄存器', value: '\x00\x01\x00\x00\x00\x06\x01\x06\x00\x00\x00\x03' },
-      { name: '读取线圈', value: '\x00\x01\x00\x00\x00\x06\x01\x01\x00\x00\x00\x10' }
+      { name: '读取线圈', value: '\x00\x01\x00\x00\x00\x06\x01\x01\x00\x00\x00\x10' },
+      { name: '写多个寄存器', value: '\x00\x01\x00\x00\x00\x0B\x01\x10\x00\x00\x00\x02\x04\x00\x0A\x01\x02' },
+      { name: '读取设备标识', value: '\x00\x01\x00\x00\x00\x05\x01\x2B\x0E\x01\x00' },
+      { name: '诊断功能', value: '\x00\x01\x00\x00\x00\x04\x01\x08\x00\x00' },
+      { name: '无效功能码', value: '\x00\x01\x00\x00\x00\x06\x01\xFF\x00\x00\x00\x0A' }
     ],
     'FTP': [
       { name: 'USER 命令', value: 'USER anonymous\r\n' },
       { name: 'PASS 命令', value: 'PASS guest\r\n' },
       { name: 'LIST 命令', value: 'LIST\r\n' },
-      { name: 'RETR 命令', value: 'RETR file.txt\r\n' }
+      { name: 'RETR 命令', value: 'RETR file.txt\r\n' },
+      { name: 'STOR 命令', value: 'STOR upload.txt\r\n' },
+      { name: 'CWD 路径遍历', value: 'CWD ../../../../etc\r\n' },
+      { name: 'MKD 创建目录', value: 'MKD testdir\r\n' },
+      { name: 'DELE 删除文件', value: 'DELE file.txt\r\n' }
     ],
     'TCP': [
       { name: '简单文本', value: 'Hello World' },
+      { name: '格式化字符串', value: 'test %s %x %n %p' },
+      { name: 'SQL注入', value: 'admin\' OR \'1\'=\'1\' --' },
+      { name: '命令注入', value: 'test; ls -la | cat /etc/passwd' },
+      { name: 'XSS攻击', value: '<scr' + 'ipt>alert(document.cookie)</scr' + 'ipt>' },
+      { name: '路径遍历', value: '../../../etc/passwd' },
+      { name: 'LDAP注入', value: 'admin)(|(password=*))' },
+      { name: 'XXE注入', value: '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>' },
+      { name: '缓冲区溢出', value: 'A'.repeat(500) },
       { name: '二进制数据', value: '\x00\x01\x02\x03\x04\x05' },
-      { name: '长字符串', value: 'A'.repeat(100) },
+      { name: 'NULL字节注入', value: 'test\x00admin' },
+      { name: '整数溢出', value: '\xFF\xFF\xFF\xFF' },
       { name: '自定义 TCP', value: '' }
     ],
     'UDP': [
       { name: 'DNS 查询', value: '\x00\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00' },
+      { name: 'DNS 放大攻击', value: '\x00\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x01\x03\x77\x77\x77\x07\x65\x78\x61\x6D\x70\x6C\x65\x03\x63\x6F\x6D\x00\x00\xFF\x00\x01' },
       { name: 'SNMP GET', value: '\x30\x26\x02\x01\x00\x04\x06\x70\x75\x62\x6c\x69\x63' },
+      { name: 'SNMP SET', value: '\x30\x39\x02\x01\x00\x04\x06\x70\x75\x62\x6c\x69\x63\xA3\x2C' },
+      { name: 'NTP 请求', value: '\x1B\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' },
+      { name: 'TFTP 读取', value: '\x00\x01config.txt\x00octet\x00' },
+      { name: 'SIP INVITE', value: 'INVITE sip:user@target SIP/2.0\r\n' },
       { name: '简单文本', value: 'UDP Test Data' },
       { name: '自定义 UDP', value: '' }
     ]
@@ -1522,6 +1643,9 @@ const startReplay = async () => {
   }
 
   if (!await confirmAttack()) return
+
+  // 保存配置到 localStorage
+  saveReplayConfig()
 
   replayLoading.value = true
   try {
@@ -1601,6 +1725,9 @@ const startFuzzing = async () => {
 
   if (!await confirmAttack()) return
 
+  // 保存配置到 localStorage
+  saveFuzzConfig()
+
   fuzzLoading.value = true
   try {
     const payload = {
@@ -1671,6 +1798,9 @@ const startIDS = async () => {
   } catch {
     return
   }
+
+  // 保存配置到 localStorage
+  saveIDSConfig()
 
   idsLoading.value = true
   try {
@@ -2222,23 +2352,105 @@ const formatParamValue = (value) => {
   return String(value)
 }
 
+// 格式化规则名称
+const formatRuleName = (rule) => {
+  const ruleMap = {
+    'port_scan': '端口扫描',
+    'dos': 'DoS 攻击',
+    'brute_force': '暴力破解',
+    'sql_injection': 'SQL 注入',
+    'xss': 'XSS 攻击'
+  }
+  return ruleMap[rule] || rule
+}
+
 // 格式化时间
 const formatTime = (time) => {
   if (!time) return 'N/A'
   return new Date(time).toLocaleString('zh-CN')
 }
 
+// 配置持久化：从 localStorage 加载
+const loadSavedConfigs = () => {
+  try {
+    // 加载 IDS 配置
+    const savedIDS = localStorage.getItem('idsConfig')
+    if (savedIDS) {
+      const config = JSON.parse(savedIDS)
+      Object.assign(idsForm.value, config)
+    }
+    
+    // 加载 Replay 配置
+    const savedReplay = localStorage.getItem('replayConfig')
+    if (savedReplay) {
+      const config = JSON.parse(savedReplay)
+      Object.assign(replayForm.value, config)
+    }
+    
+    // 加载 Fuzz 配置
+    const savedFuzz = localStorage.getItem('fuzzConfig')
+    if (savedFuzz) {
+      const config = JSON.parse(savedFuzz)
+      Object.assign(fuzzForm.value, config)
+    }
+  } catch (e) {
+    console.error('Failed to load saved configs:', e)
+  }
+}
+
+// 配置持久化：保存到 localStorage
+const saveIDSConfig = () => {
+  localStorage.setItem('idsConfig', JSON.stringify(idsForm.value))
+}
+
+const saveReplayConfig = () => {
+  localStorage.setItem('replayConfig', JSON.stringify(replayForm.value))
+}
+
+const saveFuzzConfig = () => {
+  localStorage.setItem('fuzzConfig', JSON.stringify(fuzzForm.value))
+}
+
+// 监听配置变化，自动保存
+watch(() => replayForm.value.interface, () => {
+  saveReplayConfig()
+}, { deep: false })
+
+watch(() => replayForm.value.speedMultiplier, () => {
+  saveReplayConfig()
+}, { deep: false })
+
+watch(() => replayForm.value.mode, () => {
+  saveReplayConfig()
+}, { deep: false })
+
+watch(() => idsForm.value, () => {
+  saveIDSConfig()
+}, { deep: true })
+
+watch(() => fuzzForm.value, () => {
+  saveFuzzConfig()
+}, { deep: true })
+
 // 初始化
 onMounted(() => {
+  loadSavedConfigs()  // 先加载保存的配置
   loadSessions()
-  loadInterfaces()
+  loadInterfaces()    // 再加载接口（不会覆盖已保存的配置）
   loadTasks()
   loadFuzzTemplates()
   loadIDSTasks()
 
-  // 每 5 秒刷新任务列表
+  // 每 5 秒刷新任务列表（确保统计数据同步）
   refreshTimer = setInterval(() => {
-    loadTasks()
+    // 攻击任务：只在有运行中的任务时才刷新
+    const hasRunningReplayTasks = replayTasks.value.some(t => t.status === 'running')
+    const hasRunningFuzzTasks = fuzzTasks.value.some(t => t.status === 'running')
+    if (hasRunningReplayTasks || hasRunningFuzzTasks) {
+      loadTasks()
+    }
+    
+    // IDS 任务：始终刷新（因为告警可能在其他页面被删除）
     loadIDSTasks()
   }, 5000)
 })

@@ -601,8 +601,11 @@ func (h *CaptureHandler) StopCapture(c *gin.Context) {
 		return
 	}
 
-	// 更新数据库状态
-	database.GetDB().Model(&models.CaptureSession{}).Where("id = ?", id).Update("status", "stopped")
+	// 更新数据库状态和结束时间
+	database.GetDB().Model(&models.CaptureSession{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":   "stopped",
+		"end_time": time.Now(),
+	})
 
 	RespondSuccess(c, gin.H{"message": "Capture stopped"})
 }

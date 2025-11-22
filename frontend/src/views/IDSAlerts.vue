@@ -75,7 +75,6 @@
               <el-option label="暴力破解" value="brute_force" />
               <el-option label="SQL 注入" value="sql_injection" />
               <el-option label="XSS 攻击" value="xss" />
-              <el-option label="恶意软件" value="malware" />
             </el-select>
 
             <el-select
@@ -601,7 +600,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Refresh, DataAnalysis, Warning, Bell, Check, CircleCheck,
+  Refresh, Warning, Bell, Check, CircleCheck,
   Search, RefreshRight, View, ArrowDown, Hide, Edit,
   Select, Close, Delete, Document
 } from '@element-plus/icons-vue'
@@ -1047,7 +1046,10 @@ const batchDelete = async () => {
       }
     }
 
-    ElMessage.success(`已删除 ${deletedCount} 个告警`)
+    ElMessage.success({
+      message: `已删除 ${deletedCount} 个告警，统计数据将在 5 秒内自动更新`,
+      duration: 3000
+    })
     
     // 清空选择并刷新数据
     allSelectedAlerts.value = []
@@ -1070,8 +1072,7 @@ const getAlertTypeText = (type) => {
     dos: 'DoS 攻击',
     brute_force: '暴力破解',
     sql_injection: 'SQL 注入',
-    xss: 'XSS 攻击',
-    malware: '恶意软件'
+    xss: 'XSS 攻击'
   }
   return typeMap[type] || type
 }

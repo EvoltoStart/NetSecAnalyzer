@@ -84,8 +84,22 @@ func (d *BruteForceDetector) Detect(info *PacketInfo) *Alert {
 
 	attemptCount := len(record.Attempts)
 
-	// 根据敏感度设置阈值
-	threshold := 15 - d.sensitivity
+	// 根据敏感度设置阈值（改进算法，防止负数）
+	// 敏感度 1-3: 宽松（12-14 次）
+	// 敏感度 4-6: 中等（8-11 次）
+	// 敏感度 7-10: 严格（4-7 次）
+	var threshold int
+	if d.sensitivity <= 3 {
+		threshold = 15 - d.sensitivity // 12-14
+	} else if d.sensitivity <= 6 {
+		threshold = 12 - d.sensitivity // 6-8
+	} else {
+		threshold = 11 - d.sensitivity // 1-4
+	}
+	// 确保阈值至少为 3
+	if threshold < 3 {
+		threshold = 3
+	}
 
 	// 如果尝试次数超过阈值，触发告警
 	if attemptCount >= threshold {
@@ -116,15 +130,21 @@ func (d *BruteForceDetector) isAuthPort(port int) bool {
 		22,   // SSH
 		23,   // Telnet
 		25,   // SMTP
+		80,   // HTTP
 		110,  // POP3
 		143,  // IMAP
 		389,  // LDAP
+		443,  // HTTPS
 		445,  // SMB
+		3000, // HTTP Dev
 		3306, // MySQL
 		3389, // RDP
+		5000, // HTTP Dev
 		5432, // PostgreSQL
 		5900, // VNC
+		8000, // HTTP Alt
 		8080, // HTTP Alt
+		9000, // HTTP Alt
 	}
 
 	for _, p := range authPorts {
@@ -137,10 +157,12 @@ func (d *BruteForceDetector) isAuthPort(port int) bool {
 
 // isAuthTraffic 判断是否为认证流量
 func (d *BruteForceDetector) isAuthTraffic(payload string) bool {
-	// 简单的关键字匹配
+	// 必须包含认证相关关键字才判定为认证流量
 	keywords := []string{
 		"login", "password", "auth", "user",
 		"USER", "PASS", "AUTH",
+		"Authorization:", "WWW-Authenticate:", // HTTP 认证头
+		"username", "passwd", "credential", // 其他认证关键字
 	}
 
 	payloadLower := strings.ToLower(payload)
@@ -150,7 +172,9 @@ func (d *BruteForceDetector) isAuthTraffic(payload string) bool {
 		}
 	}
 
-	return len(payload) > 0 // 如果有 payload，也认为可能是认证流量
+	// ✅ 修复：只有包含认证关键字才返回 true
+	// 移除了 "return len(payload) > 0" 的兜底逻辑
+	return false
 }
 
 // getServiceName 获取服务名称

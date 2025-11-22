@@ -15,8 +15,9 @@ import (
 
 // Fuzzer 模糊测试器
 type Fuzzer struct {
-	Manager *AttackManager
-	rand    *rand.Rand
+	Manager    *AttackManager
+	rand       *rand.Rand
+	httpClient *http.Client // 复用HTTP客户端
 }
 
 // NewFuzzer 创建 Fuzzer
@@ -24,6 +25,15 @@ func NewFuzzer(manager *AttackManager) *Fuzzer {
 	return &Fuzzer{
 		Manager: manager,
 		rand:    rand.New(rand.NewSource(time.Now().UnixNano())),
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+				DisableKeepAlives:   false, // 启用连接复用
+			},
+		},
 	}
 }
 
@@ -47,7 +57,7 @@ type FuzzResult struct {
 	Payload      []byte                 `json:"payload"`
 	Response     []byte                 `json:"response,omitempty"`
 	Error        string                 `json:"error,omitempty"`
-	ResponseTime time.Duration          `json:"response_time"`
+	ResponseTime int64                  `json:"response_time"` // 毫秒
 	Anomaly      bool                   `json:"anomaly"`
 	Details      map[string]interface{} `json:"details,omitempty"`
 }
@@ -76,7 +86,7 @@ func (f *Fuzzer) Fuzz(ctx context.Context, config *FuzzConfig) ([]*FuzzResult, e
 
 			startTime := time.Now()
 			response, err := f.sendPayload(config.Target, config.Port, config.Protocol, mutatedPayload, config.Timeout)
-			result.ResponseTime = time.Since(startTime)
+			result.ResponseTime = time.Since(startTime).Milliseconds() // 转换为毫秒
 
 			if err != nil {
 				result.Error = err.Error()
@@ -84,6 +94,16 @@ func (f *Fuzzer) Fuzz(ctx context.Context, config *FuzzConfig) ([]*FuzzResult, e
 			} else {
 				result.Response = response
 				result.Anomaly = f.detectAnomalyWithConfig(response, result.ResponseTime, config.AnomalyDetection)
+
+				// 如果检测到异常，提取响应中的错误信息
+				if result.Anomaly && len(response) > 0 {
+					// 将响应内容作为错误信息（截取前200字符）
+					errorMsg := string(response)
+					if len(errorMsg) > 200 {
+						errorMsg = errorMsg[:200] + "..."
+					}
+					result.Error = errorMsg
+				}
 			}
 
 			results = append(results, result)
@@ -381,12 +401,14 @@ func (f *Fuzzer) sendUDP(address string, payload []byte, timeout time.Duration) 
 func (f *Fuzzer) sendHTTP(host string, port int, payload []byte, timeout time.Duration) ([]byte, error) {
 	logger.GetLogger().Debugf("Sending HTTP payload to %s:%d (%d bytes)", host, port, len(payload))
 
-	// 创建 HTTP 客户端
-	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-		},
+	// 使用复用的HTTP客户端，但设置当前请求的超时
+	client := f.httpClient
+	if timeout > 0 && timeout != client.Timeout {
+		// 如果超时不同，创建临时客户端
+		client = &http.Client{
+			Timeout:   timeout,
+			Transport: f.httpClient.Transport,
+		}
 	}
 
 	// 构建 URL
@@ -415,12 +437,12 @@ func (f *Fuzzer) sendHTTP(host string, port int, payload []byte, timeout time.Du
 }
 
 // detectAnomalyWithConfig 根据配置检测异常
-func (f *Fuzzer) detectAnomalyWithConfig(response []byte, responseTime time.Duration, detectionConfig []string) bool {
+func (f *Fuzzer) detectAnomalyWithConfig(response []byte, responseTimeMs int64, detectionConfig []string) bool {
 	for _, check := range detectionConfig {
 		switch check {
 		case "timeout":
-			// 响应时间过长
-			if responseTime > 5*time.Second {
+			// 响应时间过长 (超过5秒 = 5000毫秒)
+			if responseTimeMs > 5000 {
 				return true
 			}
 		case "error":
