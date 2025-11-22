@@ -308,13 +308,13 @@
         <el-descriptions-item label="参考资料" :span="2">
           <div v-if="currentVuln.references && currentVuln.references !== 'N/A'">
             <a
-              v-for="(ref, idx) in currentVuln.references.split(',')"
+              v-for="(refLink, idx) in currentVuln.references.split(',')"
               :key="idx"
-              :href="ref.trim()"
+              :href="refLink.trim()"
               target="_blank"
               style="display: block; color: #409eff; text-decoration: none; margin: 4px 0;"
             >
-              <el-icon><Link /></el-icon> {{ ref.trim() }}
+              <el-icon><Link /></el-icon> {{ refLink.trim() }}
             </a>
           </div>
           <div v-else style="color: #909399;">

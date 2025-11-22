@@ -2444,8 +2444,9 @@ onMounted(() => {
   // 每 5 秒刷新任务列表（确保统计数据同步）
   refreshTimer = setInterval(() => {
     // 攻击任务：只在有运行中的任务时才刷新
-    const hasRunningAttackTasks = attackTasks.value.some(t => t.status === 'running')
-    if (hasRunningAttackTasks) {
+    const hasRunningReplayTasks = replayTasks.value.some(t => t.status === 'running')
+    const hasRunningFuzzTasks = fuzzTasks.value.some(t => t.status === 'running')
+    if (hasRunningReplayTasks || hasRunningFuzzTasks) {
       loadTasks()
     }
     
