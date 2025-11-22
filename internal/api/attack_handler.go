@@ -14,17 +14,21 @@ import (
 
 // AttackHandler 攻击处理器
 type AttackHandler struct {
-	manager  *attack.AttackManager
-	replayer *attack.Replayer
-	fuzzer   *attack.Fuzzer
+	manager     *attack.AttackManager
+	replayer    *attack.Replayer
+	fuzzer      *attack.Fuzzer
+	taskManager *attack.TaskManager
+	semaphore   chan struct{} // 限制并发任务数量
 }
 
 // NewAttackHandler 创建攻击处理器
 func NewAttackHandler(m *attack.AttackManager) *AttackHandler {
 	return &AttackHandler{
-		manager:  m,
-		replayer: attack.NewReplayer(m),
-		fuzzer:   attack.NewFuzzer(m),
+		manager:     m,
+		replayer:    attack.NewReplayer(m),
+		fuzzer:      attack.NewFuzzer(m),
+		taskManager: attack.NewTaskManager(),
+		semaphore:   make(chan struct{}, 10), // 最多10个并发任务
 	}
 }
 
@@ -88,14 +92,36 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 		query = query.Where("dst_addr = ?", req.DstAddrFilter)
 	}
 
-	// 获取过滤后的数据包
-	var packets []models.Packet
-	query.Find(&packets)
+	// 检查数据包数量（使用独立的查询，避免消耗原query）
+	var packetCount int64
+	countQuery := database.GetDB().Model(&models.Packet{}).Where("session_id = ?", req.SessionID)
+	if req.ProtocolFilter != "" {
+		countQuery = countQuery.Where("protocol = ?", req.ProtocolFilter)
+	}
+	if req.SrcAddrFilter != "" {
+		countQuery = countQuery.Where("src_addr = ?", req.SrcAddrFilter)
+	}
+	if req.DstAddrFilter != "" {
+		countQuery = countQuery.Where("dst_addr = ?", req.DstAddrFilter)
+	}
+	countQuery.Count(&packetCount)
 
-	if len(packets) == 0 {
+	if packetCount == 0 {
 		RespondNotFound(c, "No packets found")
 		return
 	}
+
+	// 限制最大数据包数量，防止内存溢出
+	const maxPackets = 50000
+	if packetCount > maxPackets {
+		logger.GetLogger().Warnf("Session has %d packets, limiting to %d", packetCount, maxPackets)
+		RespondError(c, 400, fmt.Sprintf("Too many packets (%d). Maximum allowed is %d. Please use filters to reduce the packet count.", packetCount, maxPackets))
+		return
+	}
+
+	// 获取过滤后的数据包
+	var packets []models.Packet
+	query.Find(&packets)
 
 	// 检查数据包是否有 RawData（用于重放）
 	var hasRawDataCount int64
@@ -151,12 +177,28 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 		packetPtrs[i] = &packets[i]
 	}
 
-	// 创建攻击会话
-	_ = h.manager.CreateSession(taskID, "replay", req.Interface)
+	// 检查并发限制
+	select {
+	case h.semaphore <- struct{}{}:
+		// 获取到信号量，继续执行
+	default:
+		// 并发任务已满
+		logger.GetLogger().Warnf("Too many concurrent tasks, rejecting new replay task")
+		RespondError(c, 429, "Too many concurrent tasks. Please wait for existing tasks to complete.")
+		return
+	}
 
 	// 异步执行重放
 	go func() {
-		ctx := context.Background()
+		defer func() { <-h.semaphore }() // 释放信号量
+		// 创建可取消的context，添加30分钟超时保护
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+
+		// 注册任务到管理器
+		h.taskManager.AddTask(task.ID, cancel)
+		defer h.taskManager.RemoveTask(task.ID)
+
 		startTime := time.Now()
 
 		// 创建重放配置
@@ -172,6 +214,26 @@ func (h *AttackHandler) ReplayPackets(c *gin.Context) {
 
 		// 执行重放
 		result, err := h.replayer.ReplayPackets(ctx, packetPtrs, config)
+
+		// 检查是否被取消
+		if ctx.Err() == context.Canceled {
+			logger.GetLogger().Infof("Replay task %d was stopped by user", task.ID)
+			// 保存已完成的结果
+			totalSent := 0
+			totalFailed := 0
+			if result != nil {
+				totalSent = result.SentCount
+				totalFailed = result.FailedCount
+			}
+			updateTaskStatus(task.ID, "stopped", 100, map[string]interface{}{
+				"packetsSent":   totalSent,
+				"packetsFailed": totalFailed,
+				"duration":      time.Since(startTime).String(),
+				"message":       "Stopped by user",
+			})
+			h.manager.LogAttack("replay", req.Interface, "packet_replay", req.UserID, nil, "stopped", "stopped")
+			return
+		}
 		if err != nil {
 			logger.GetLogger().Errorf("Replay failed: %v", err)
 			totalSent := 0
@@ -236,6 +298,13 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 	if req.Iterations == 0 {
 		req.Iterations = 100
 	}
+	// 限制最大迭代次数，防止内存溢出
+	const maxIterations = 100000
+	if req.Iterations > maxIterations {
+		logger.GetLogger().Warnf("Iterations %d exceeds maximum %d, limiting", req.Iterations, maxIterations)
+		RespondError(c, 400, fmt.Sprintf("Iterations cannot exceed %d. Please use a smaller value.", maxIterations))
+		return
+	}
 	if req.MutationRate == 0 {
 		req.MutationRate = 0.1
 	}
@@ -289,12 +358,28 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 		return
 	}
 
-	// 创建攻击会话
-	_ = h.manager.CreateSession(taskID, "fuzzing", target)
+	// 检查并发限制
+	select {
+	case h.semaphore <- struct{}{}:
+		// 获取到信号量，继续执行
+	default:
+		// 并发任务已满
+		logger.GetLogger().Warnf("Too many concurrent tasks, rejecting new fuzzing task")
+		RespondError(c, 429, "Too many concurrent tasks. Please wait for existing tasks to complete.")
+		return
+	}
 
 	// 异步执行 Fuzzing
 	go func() {
-		ctx := context.Background()
+		defer func() { <-h.semaphore }() // 释放信号量
+		// 创建可取消的context，添加1小时超时保护
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Hour)
+		defer cancel()
+
+		// 注册任务到管理器
+		h.taskManager.AddTask(task.ID, cancel)
+		defer h.taskManager.RemoveTask(task.ID)
+
 		startTime := time.Now()
 
 		// 准备配置
@@ -313,6 +398,33 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 
 		// 执行 Fuzzing
 		results, err := h.fuzzer.Fuzz(ctx, config)
+
+		// 检查是否被取消
+		if ctx.Err() == context.Canceled {
+			logger.GetLogger().Infof("Fuzzing task %d was stopped by user", task.ID)
+			// 保存已完成的结果 - 只保存异常结果
+			anomalyCount := 0
+			anomalyResults := make([]*attack.FuzzResult, 0)
+			for _, result := range results {
+				if result.Anomaly {
+					anomalyCount++
+					if len(anomalyResults) < 100 { // 限制数量
+						anomalyResults = append(anomalyResults, result)
+					}
+				}
+			}
+			updateTaskStatus(task.ID, "stopped", 100, map[string]interface{}{
+				"iterations":       len(results),
+				"anomalies":        anomalyCount,
+				"anomalyResults":   anomalyResults,
+				"duration":         time.Since(startTime).String(),
+				"message":          "Stopped by user",
+				"resultsTruncated": len(anomalyResults) < anomalyCount,
+			})
+			h.manager.LogAttack("fuzzing", target, "protocol_fuzzing", req.UserID, nil, "stopped", "stopped")
+			return
+		}
+
 		if err != nil {
 			logger.GetLogger().Errorf("Fuzzing failed: %v", err)
 			updateTaskStatus(task.ID, "failed", 100, map[string]interface{}{
@@ -331,12 +443,27 @@ func (h *AttackHandler) StartFuzzing(c *gin.Context) {
 			}
 		}
 
-		// 完成
+		// 完成 - 只保存异常结果和摘要，避免数据库字段过大
+		anomalyResults := make([]*attack.FuzzResult, 0)
+		for _, result := range results {
+			if result.Anomaly {
+				anomalyResults = append(anomalyResults, result)
+			}
+		}
+
+		// 限制保存的结果数量
+		const maxSavedResults = 100
+		if len(anomalyResults) > maxSavedResults {
+			logger.GetLogger().Warnf("Too many anomaly results (%d), limiting to %d", len(anomalyResults), maxSavedResults)
+			anomalyResults = anomalyResults[:maxSavedResults]
+		}
+
 		updateTaskStatus(task.ID, "completed", 100, map[string]interface{}{
-			"iterations": len(results),
-			"anomalies":  anomalyCount,
-			"results":    results,
-			"duration":   time.Since(startTime).String(),
+			"iterations":       len(results),
+			"anomalies":        anomalyCount,
+			"anomalyResults":   anomalyResults, // 只保存异常结果
+			"duration":         time.Since(startTime).String(),
+			"resultsTruncated": len(anomalyResults) < anomalyCount,
 		})
 		h.manager.LogAttack("fuzzing", target, "protocol_fuzzing", req.UserID, nil, "success", "success")
 	}()
@@ -408,7 +535,12 @@ func (h *AttackHandler) GetTask(c *gin.Context) {
 
 // StopTask 停止任务
 func (h *AttackHandler) StopTask(c *gin.Context) {
-	taskID := c.Param("id")
+	taskIDStr := c.Param("id")
+	var taskID uint
+	if _, err := fmt.Sscanf(taskIDStr, "%d", &taskID); err != nil {
+		RespondBadRequest(c, "Invalid task ID")
+		return
+	}
 
 	var task models.AttackTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
@@ -421,20 +553,28 @@ func (h *AttackHandler) StopTask(c *gin.Context) {
 		return
 	}
 
-	// 停止攻击会话
-	if err := h.manager.StopSession(task.TaskID); err != nil {
-		logger.GetLogger().Warnf("Failed to stop session: %v", err)
+	// 停止任务（通过取消context）
+	if h.taskManager.StopTask(taskID) {
+		logger.GetLogger().Infof("Stopping task %d via context cancellation", taskID)
 	}
 
-	// 更新任务状态
-	updateTaskStatus(task.ID, "stopped", task.Progress, nil)
+	// 注意：不在这里更新状态，让异步任务自己更新为stopped状态并保存结果
 
-	RespondSuccess(c, gin.H{"message": "Task stopped"})
+	RespondSuccess(c, gin.H{
+		"message": "Task stop signal sent",
+		"taskId":  taskID,
+	})
 }
 
 // DeleteTask 删除任务
+// 注意: 不能删除正在运行的任务，必须先停止
 func (h *AttackHandler) DeleteTask(c *gin.Context) {
-	taskID := c.Param("id")
+	taskIDStr := c.Param("id")
+	var taskID uint
+	if _, err := fmt.Sscanf(taskIDStr, "%d", &taskID); err != nil {
+		RespondBadRequest(c, "Invalid task ID")
+		return
+	}
 
 	var task models.AttackTask
 	if err := database.GetDB().First(&task, taskID).Error; err != nil {
@@ -442,9 +582,16 @@ func (h *AttackHandler) DeleteTask(c *gin.Context) {
 		return
 	}
 
-	if task.Status == "running" {
-		RespondBadRequest(c, "Cannot delete running task")
+	// 双重检查：数据库状态 + TaskManager 状态
+	if task.Status == "running" || h.taskManager.IsRunning(taskID) {
+		RespondBadRequest(c, "Cannot delete running task. Please stop it first.")
 		return
+	}
+
+	// 确保从 TaskManager 中移除（防止遗漏）
+	if h.taskManager.IsRunning(taskID) {
+		h.taskManager.StopTask(taskID)
+		logger.GetLogger().Warnf("Task %d was still in TaskManager, stopped before deletion", taskID)
 	}
 
 	if err := database.GetDB().Delete(&task).Error; err != nil {
@@ -452,10 +599,12 @@ func (h *AttackHandler) DeleteTask(c *gin.Context) {
 		return
 	}
 
+	logger.GetLogger().Infof("Task %d deleted successfully", taskID)
 	RespondSuccess(c, gin.H{"message": "Task deleted"})
 }
 
 // BatchDeleteTasks 批量删除任务
+// 注意: 不能删除正在运行的任务，必须先停止
 func (h *AttackHandler) BatchDeleteTasks(c *gin.Context) {
 	var req struct {
 		TaskIDs []uint `json:"task_ids" binding:"required"`
@@ -471,15 +620,35 @@ func (h *AttackHandler) BatchDeleteTasks(c *gin.Context) {
 		return
 	}
 
-	// 检查是否有正在运行的任务
+	// 双重检查：数据库状态 + TaskManager 状态
 	var runningCount int64
 	database.GetDB().Model(&models.AttackTask{}).
 		Where("id IN ? AND status = ?", req.TaskIDs, "running").
 		Count(&runningCount)
 
-	if runningCount > 0 {
-		RespondBadRequest(c, "Cannot delete running tasks")
+	// 检查 TaskManager 中是否有正在运行的任务
+	runningInManager := 0
+	for _, taskID := range req.TaskIDs {
+		if h.taskManager.IsRunning(taskID) {
+			runningInManager++
+		}
+	}
+
+	if runningCount > 0 || runningInManager > 0 {
+		RespondBadRequest(c, fmt.Sprintf("Cannot delete running tasks (DB: %d, Manager: %d). Please stop them first.", runningCount, runningInManager))
 		return
+	}
+
+	// 确保从 TaskManager 中清理（防止遗漏）
+	cleanedCount := 0
+	for _, taskID := range req.TaskIDs {
+		if h.taskManager.IsRunning(taskID) {
+			h.taskManager.StopTask(taskID)
+			cleanedCount++
+		}
+	}
+	if cleanedCount > 0 {
+		logger.GetLogger().Warnf("Cleaned %d tasks from TaskManager before batch deletion", cleanedCount)
 	}
 
 	// 批量删除

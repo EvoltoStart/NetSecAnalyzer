@@ -122,6 +122,7 @@ func (r *Router) setupRoutes() {
 		{
 			defense.POST("/ids/start", r.defenseHandler.StartIDS)
 			defense.POST("/ids/:id/stop", r.defenseHandler.StopIDS)
+			defense.PUT("/ids/:id/auto-block", r.defenseHandler.UpdateIDSAutoBlock)
 			defense.DELETE("/ids/tasks/:id", r.defenseHandler.DeleteIDSTask)
 			defense.POST("/ids/tasks/batch-delete", r.defenseHandler.BatchDeleteIDSTasks)
 			defense.GET("/ids/tasks", r.defenseHandler.GetIDSTasks)

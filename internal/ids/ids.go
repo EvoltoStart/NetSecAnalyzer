@@ -7,6 +7,7 @@ import (
 	"netsecanalyzer/pkg/logger"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/gopacket"
@@ -40,17 +41,18 @@ type IDS struct {
 	Rules          []string
 	Sensitivity    int
 	AlertThreshold int
-	AutoBlock      bool
+	autoBlock      atomic.Bool // 使用原子变量支持动态修改
 
-	handle     *pcap.Handle
-	detectors  []Detector
-	alerts     []Alert
-	alertsMux  sync.RWMutex
-	stats      Statistics
-	statsMux   sync.RWMutex
-	stopChan   chan struct{}
-	running    bool
-	runningMux sync.RWMutex
+	handle      *pcap.Handle
+	flowManager *FlowManager // 流管理器
+	detectors   []Detector
+	alerts      []Alert
+	alertsMux   sync.RWMutex
+	stats       Statistics
+	statsMux    sync.RWMutex
+	stopChan    chan struct{}
+	running     bool
+	runningMux  sync.RWMutex
 }
 
 // NewIDS 创建 IDS 实例
@@ -61,10 +63,13 @@ func NewIDS(iface, mode string, rules []string, sensitivity, alertThreshold int,
 		Rules:          rules,
 		Sensitivity:    sensitivity,
 		AlertThreshold: alertThreshold,
-		AutoBlock:      autoBlock,
 		alerts:         make([]Alert, 0),
 		stopChan:       make(chan struct{}),
+		flowManager:    NewFlowManager(DefaultFlowConfig()), // 初始化流管理器
 	}
+
+	// 初始化 autoBlock 原子变量
+	ids.autoBlock.Store(autoBlock)
 
 	// 初始化检测器
 	ids.initDetectors()
@@ -135,9 +140,26 @@ func (ids *IDS) Stop() {
 	if ids.handle != nil {
 		ids.handle.Close()
 	}
+
+	// 停止流管理器
+	if ids.flowManager != nil {
+		ids.flowManager.Stop()
+	}
+
 	ids.running = false
 
 	logger.GetLogger().Info("IDS stopped")
+}
+
+// SetAutoBlock 动态设置自动阻断开关
+func (ids *IDS) SetAutoBlock(enabled bool) {
+	ids.autoBlock.Store(enabled)
+	logger.GetLogger().Infof("IDS auto-block %s", map[bool]string{true: "enabled", false: "disabled"}[enabled])
+}
+
+// GetAutoBlock 获取当前自动阻断状态
+func (ids *IDS) GetAutoBlock() bool {
+	return ids.autoBlock.Load()
 }
 
 // processPackets 处理数据包
@@ -173,10 +195,66 @@ func (ids *IDS) processPacket(packet gopacket.Packet) {
 		return
 	}
 
-	// 使用所有检测器检测
+	// 添加到流管理器
+	var payload []byte
+	if appLayer := packet.ApplicationLayer(); appLayer != nil {
+		payload = appLayer.Payload()
+	}
+
+	flow := ids.flowManager.AddPacket(info.SrcIP, info.SrcPort, info.DstIP, info.DstPort, payload)
+
+	// 网络层检测（端口扫描、DoS）- 每个包都检测
 	for _, detector := range ids.detectors {
-		if alert := detector.Detect(info); alert != nil {
-			ids.handleAlert(alert)
+		detectorName := detector.GetName()
+
+		// 网络层检测器：使用原始包信息
+		if detectorName == "PortScanDetector" || detectorName == "DoSDetector" || detectorName == "BruteForceDetector" {
+			if alert := detector.Detect(info); alert != nil {
+				ids.handleAlert(alert)
+			}
+			continue
+		}
+	}
+
+	// 应用层检测（SQL注入、XSS）- 只在流缓冲足够大且是 HTTP 时检测
+	// 并且避免重复检测：只在特定条件下检测一次
+	if flow.IsHTTP && len(flow.Buffer) >= 20 { // 降低到 20 字节
+		// 检测条件（更宽松）：
+		// 1. 每 2 个包检测一次（更频繁）
+		// 2. 或者缓冲 >= 100 字节（降低阈值）
+		// 3. 或者是前 5 个包（扩大范围）
+		shouldDetect := (flow.PacketCount%2 == 0) ||
+			(len(flow.Buffer) >= 100) ||
+			(flow.PacketCount <= 5)
+
+		if shouldDetect {
+			// 调试日志：记录检测时的流状态
+			logger.GetLogger().Infof("🔍 App-layer detection: Flow=%s, Packets=%d, BufferSize=%d, Preview=%s",
+				flow.Key, flow.PacketCount, len(flow.Buffer),
+				string(flow.Buffer[:min(100, len(flow.Buffer))]))
+
+			for _, detector := range ids.detectors {
+				detectorName := detector.GetName()
+
+				// 应用层检测器：使用流缓冲
+				if detectorName == "SQLInjectionDetector" || detectorName == "XSSDetector" {
+					flowInfo := &PacketInfo{
+						Timestamp: info.Timestamp,
+						Length:    flow.ByteCount,
+						SrcIP:     flow.SrcIP,
+						SrcPort:   flow.SrcPort,
+						DstIP:     flow.DstIP,
+						DstPort:   flow.DstPort,
+						Protocol:  info.Protocol,
+						TCPFlags:  info.TCPFlags,
+						Payload:   string(flow.Buffer), // 使用完整的流缓冲
+					}
+
+					if alert := detector.Detect(flowInfo); alert != nil {
+						ids.handleAlert(alert)
+					}
+				}
+			}
 		}
 	}
 }
@@ -206,11 +284,36 @@ func (ids *IDS) extractPacketInfo(packet gopacket.Packet) *PacketInfo {
 		tcp, _ := tcpLayer.(*layers.TCP)
 		info.SrcPort = int(tcp.SrcPort)
 		info.DstPort = int(tcp.DstPort)
-		info.TCPFlags = fmt.Sprintf("%v", tcp.SYN) + fmt.Sprintf("%v", tcp.ACK) + fmt.Sprintf("%v", tcp.FIN)
+		info.Protocol = "TCP"
+
+		// 正确提取 TCP 标志
+		flags := ""
+		if tcp.SYN {
+			flags += "S"
+		}
+		if tcp.ACK {
+			flags += "A"
+		}
+		if tcp.FIN {
+			flags += "F"
+		}
+		if tcp.RST {
+			flags += "R"
+		}
+		if tcp.PSH {
+			flags += "P"
+		}
+		if tcp.URG {
+			flags += "U"
+		}
+		info.TCPFlags = flags
 	} else if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp, _ := udpLayer.(*layers.UDP)
 		info.SrcPort = int(udp.SrcPort)
 		info.DstPort = int(udp.DstPort)
+		info.Protocol = "UDP"
+	} else if packet.Layer(layers.LayerTypeICMPv4) != nil || packet.Layer(layers.LayerTypeICMPv6) != nil {
+		info.Protocol = "ICMP"
 	}
 
 	// 提取应用层数据
@@ -240,8 +343,8 @@ func (ids *IDS) handleAlert(alert *Alert) {
 
 	logger.GetLogger().Warnf("IDS Alert: [%s] %s from %s", alert.Type, alert.Description, alert.Source)
 
-	// 自动阻断
-	if ids.AutoBlock {
+	// 自动阻断（使用原子变量读取）
+	if ids.autoBlock.Load() {
 		ids.blockSource(alert.Source)
 	}
 }
@@ -310,10 +413,26 @@ func (ids *IDS) GetStatistics() Statistics {
 	return ids.stats
 }
 
+// GetFlowStats 获取流统计信息
+func (ids *IDS) GetFlowStats() FlowStats {
+	if ids.flowManager != nil {
+		return ids.flowManager.GetStats()
+	}
+	return FlowStats{}
+}
+
 // IsRunning 检查是否运行中
 func (ids *IDS) IsRunning() bool {
 	ids.runningMux.RLock()
 	defer ids.runningMux.RUnlock()
 
 	return ids.running
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

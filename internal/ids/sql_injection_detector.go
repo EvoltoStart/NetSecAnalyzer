@@ -2,7 +2,9 @@ package ids
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
+	"strings"
 )
 
 // SQLInjectionDetector SQL 注入检测器
@@ -56,36 +58,68 @@ func (d *SQLInjectionDetector) compilePatterns() {
 
 // Detect 检测 SQL 注入
 func (d *SQLInjectionDetector) Detect(info *PacketInfo) *Alert {
-	// 只检测 HTTP 流量
-	if info.DstPort != 80 && info.DstPort != 443 && info.DstPort != 8080 {
-		return nil
-	}
-
-	// 检查 payload
+	// 检查 payload 是否存在
 	if len(info.Payload) == 0 {
 		return nil
 	}
 
-	// 检测 SQL 注入特征
+	// 判断是否为 HTTP 流量
+	if !IsHTTPTraffic(info.Payload) {
+		return nil
+	}
+
+	// URL 解码 payload（处理 URL 编码的攻击）
+	decodedPayload := info.Payload
+	if decoded, err := url.QueryUnescape(info.Payload); err == nil {
+		decodedPayload = decoded
+	}
+
+	// 检测 SQL 注入特征（同时检测原始和解码后的 payload）
 	matches := d.detectSQLInjection(info.Payload)
-	if len(matches) == 0 {
+	decodedMatches := d.detectSQLInjection(decodedPayload)
+
+	// 合并匹配结果
+	allMatches := make(map[string]bool)
+	for _, m := range matches {
+		allMatches[m] = true
+	}
+	for _, m := range decodedMatches {
+		allMatches[m] = true
+	}
+
+	// 转换为切片
+	finalMatches := make([]string, 0, len(allMatches))
+	for m := range allMatches {
+		finalMatches = append(finalMatches, m)
+	}
+
+	if len(finalMatches) == 0 {
 		return nil
 	}
 
 	// 根据敏感度决定是否触发告警
 	// 敏感度越高，匹配到一个模式就告警
-	if d.sensitivity >= 5 || len(matches) > 1 {
+	if d.sensitivity >= 5 || len(finalMatches) > 1 {
+		// 检查是否为 URL 编码攻击
+		isEncoded := strings.Contains(info.Payload, "%") && info.Payload != decodedPayload
+		description := fmt.Sprintf("Detected SQL injection attempt (%d patterns matched)", len(finalMatches))
+		if isEncoded {
+			description += " [URL-encoded]"
+		}
+
 		return &Alert{
 			Type:        "sql_injection",
-			Severity:    d.getSeverity(len(matches)),
-			Description: fmt.Sprintf("Detected SQL injection attempt (%d patterns matched)", len(matches)),
+			Severity:    GetSeverityByMatchCount(len(finalMatches)),
+			Description: description,
 			Source:      info.SrcIP,
 			Destination: info.DstIP,
 			Timestamp:   info.Timestamp,
 			Details: map[string]interface{}{
-				"patterns_matched": matches,
+				"patterns_matched": finalMatches,
 				"target_port":      info.DstPort,
-				"payload_preview":  d.getPayloadPreview(info.Payload),
+				"payload_preview":  GetPayloadPreview(info.Payload, 200),
+				"is_url_encoded":   isEncoded,
+				"decoded_preview":  GetPayloadPreview(decodedPayload, 200),
 			},
 		}
 	}
@@ -104,27 +138,6 @@ func (d *SQLInjectionDetector) detectSQLInjection(payload string) []string {
 	}
 
 	return matches
-}
-
-// getPayloadPreview 获取 payload 预览
-func (d *SQLInjectionDetector) getPayloadPreview(payload string) string {
-	maxLen := 200
-	if len(payload) > maxLen {
-		return payload[:maxLen] + "..."
-	}
-	return payload
-}
-
-// getSeverity 根据匹配数量确定严重程度
-func (d *SQLInjectionDetector) getSeverity(matchCount int) string {
-	if matchCount >= 5 {
-		return "critical"
-	} else if matchCount >= 3 {
-		return "high"
-	} else if matchCount >= 2 {
-		return "medium"
-	}
-	return "low"
 }
 
 // GetName 获取检测器名称

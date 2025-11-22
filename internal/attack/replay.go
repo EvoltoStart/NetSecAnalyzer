@@ -146,8 +146,22 @@ func (r *Replayer) sendPackets(ctx context.Context, handle *pcap.Handle, packets
 				expectedElapsed := pkt.Timestamp.Sub(startTime)
 				waitTime := time.Duration(float64(expectedElapsed)/config.SpeedMultiplier) - elapsed
 
+				// 限制最大等待时间，避免长时间阻塞
+				const maxWaitTime = 10 * time.Second
+				if waitTime > maxWaitTime {
+					logger.GetLogger().Warnf("Wait time too long (%v), limiting to %v", waitTime, maxWaitTime)
+					waitTime = maxWaitTime
+				}
+
 				if waitTime > 0 {
-					time.Sleep(waitTime)
+					// 使用可中断的 sleep
+					select {
+					case <-ctx.Done():
+						logger.GetLogger().Infof("Packet replay interrupted during sleep")
+						return result, ctx.Err()
+					case <-time.After(waitTime):
+						// 继续
+					}
 				}
 			}
 
