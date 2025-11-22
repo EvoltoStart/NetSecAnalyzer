@@ -82,7 +82,6 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'

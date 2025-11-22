@@ -600,7 +600,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Refresh, DataAnalysis, Warning, Bell, Check, CircleCheck,
+  Refresh, Warning, Bell, Check, CircleCheck,
   Search, RefreshRight, View, ArrowDown, Hide, Edit,
   Select, Close, Delete, Document
 } from '@element-plus/icons-vue'
